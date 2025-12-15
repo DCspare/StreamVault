@@ -67,15 +67,13 @@ StreamVault/
 
 ## 🔴 CURRENT ISSUE: AUTH KEY THRASHING / FLOOD WAIT
 - [ ] **Data Persistence Failure (The "Auth Loop"):**
-- **SYMPTOM:** The bot logs `Start creating a new auth key` repeatedly. Video plays for 2s, buffers, then fails. Logs show `[400 OFFSET_INVALID]` or `[420 FLOOD_WAIT]`.
+- **SYMPTOM:** The bot logs `Start creating a new auth key` repeatedly. Video plays for 2s, buffers, then fails. Logs show `[400 OFFSET_INVALID]`
 - **ROOT CAUSE:** Docker container wasn't allowing Pyrogram to **write the session file** to disk (`in_memory=True` or Bad Permissions).
     *   *Result 1:* Every network jitter creates a New Auth Key.
     *   *Result 2:* Video Player asks for file using Old Key -> Telegram says "Invalid".
-    *   *Result 3:* Too many new keys in <10mins -> Telegram bans with `420 FLOOD_WAIT`.
 - **SOLUTION (IN PROGRESS):**
     1.  **Docker:** `RUN chown -R 1000:1000 /app` to guarantee write access.
     2.  **Code:** Set `in_memory=False`, `workdir="."`.
-    3.  **Bypass:** Renaming Session from `streamvault_v1` to `streamvault_v2` to escape the 2000s ban timer.
 
 ---
 
