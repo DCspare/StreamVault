@@ -13,10 +13,10 @@ if not Config.API_ID or not Config.API_HASH or not Config.BOT_TOKEN:
 # 🛠️ PROXY CONFIG
 proxy_config = dict(
     scheme="socks5",
-    hostname="142.111.48.253",
-    port=7030,
-    username="fbvilezw",
-    password="qhfflj8i2rzg"
+    hostname="37.18.73.60", # proxydb.net socks5 high anonymous 
+    port=5566,
+   # username="fbvilezw",
+   # password="qhfflj8i2rzg"
 )
 
 SESSION_NAME = "streamvault_v1"
