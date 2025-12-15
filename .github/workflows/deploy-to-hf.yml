@@ -19,4 +19,5 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add space https://x-access-token:$HF_TOKEN@huggingface.co/spaces/DC-Hacks/StreamVault-Git
+          git pull
           git push space main
