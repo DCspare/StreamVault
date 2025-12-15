@@ -1,0 +1,8 @@
+pyrogram[socks]  # CRITICAL: Adds PySocks for proxy support
+tgcrypto
+fastapi
+uvicorn
+motor
+aiofiles
+dnspython
+python-dotenv
