@@ -1,0 +1,22 @@
+name: Deploy to HuggingFace Space
+
+on:
+  push:
+    branches:
+      - main  # Change to your main branch name if different
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Push to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote add space https://huggingface.co/spaces/DC-Hacks/StreamVault-Git
+          git push https://x-access-token:$HF_TOKEN@huggingface.co/spaces/DC-Hacks/StreamVault-Git main
