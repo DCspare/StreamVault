@@ -1,6 +1,6 @@
 # 🎥 Shadow Streamer (The Zero-Budget Media Ecosystem)
 
-> **A Unified Telegram Bot Architecture for High-Speed Media Streaming inside and outside Telegram.**
+> **A Unified Telegram Bot. Architecture for High-Speed Media Streaming inside and outside Telegram.**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Hugging%20Face-Docker-orange?style=for-the-badge&logo=huggingface)](https://huggingface.co/spaces)
