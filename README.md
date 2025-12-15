@@ -1,4 +1,4 @@
-# 🎥 Shadow Streamer (The Zero-Budget Media Ecosystem)
+# 🎥 Shadow Streamer (The Zero-Budget Media Ecosystem) 
 
 > **A Unified Telegram Bot Architecture for High-Speed Media Streaming inside and outside Telegram.**
 
