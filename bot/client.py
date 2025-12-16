@@ -14,6 +14,7 @@ from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.session import Auth, Session
 
 from config import Config
+from bot.session_pool import SessionPool
 
 logger = logging.getLogger("bot_client")
 
@@ -56,6 +57,7 @@ class ShadowBot(Client):
             workdir=".",
             proxy=proxy_config,
         )
+        self.session_pool = SessionPool(self)
 
     async def start(self):
         try:
@@ -134,31 +136,9 @@ class ShadowBot(Client):
 
             dc_id = file_id.dc_id
 
-            session = Session(
-                self,
-                dc_id,
-                await Auth(self, dc_id, await self.storage.test_mode()).create()
-                if dc_id != await self.storage.dc_id()
-                else await self.storage.auth_key(),
-                await self.storage.test_mode(),
-                is_media=True,
-            )
+            session = await self.session_pool.get_session(dc_id)
 
             try:
-                await session.start()
-
-                if dc_id != await self.storage.dc_id():
-                    exported_auth = await self.invoke(
-                        raw.functions.auth.ExportAuthorization(dc_id=dc_id)
-                    )
-
-                    await session.invoke(
-                        raw.functions.auth.ImportAuthorization(
-                            id=exported_auth.id,
-                            bytes=exported_auth.bytes,
-                        )
-                    )
-
                 r = await session.invoke(
                     raw.functions.upload.GetFile(
                         location=location,
@@ -298,7 +278,7 @@ class ShadowBot(Client):
             except pyrogram.StopTransmission:
                 raise
             finally:
-                await session.stop()
+                await self.session_pool.release_session(session)
 
     def cleanup_session(self):
         try:

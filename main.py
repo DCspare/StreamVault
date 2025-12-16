@@ -51,6 +51,7 @@ async def main():
         await bot_app.start()
         me = await bot_app.get_me()
         logger.info(f"--- ✅ Bot Connected as {me.first_name} ---")
+        await bot_app.session_pool.init_pool()
     except Exception as e:
         logger.error(f"--- ❌ Bot Failed: {e} ---")
         return
