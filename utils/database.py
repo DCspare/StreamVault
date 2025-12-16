@@ -53,7 +53,10 @@ class DatabaseManager:
             Exception: If connection fails or indexes cannot be created
         """
         try:
-            logger.info("Connecting to MongoDB at %s", Config.MONGO_URL)
+            # Extract cluster name without exposing credentials
+            cluster_name = Config.MONGO_URL.split("@")[1].split(".")[0] if "@" in Config.MONGO_URL else "unknown"
+            logger.info(f"✅ Connecting to MongoDB cluster: {cluster_name}")
+            
             self.client = AsyncIOMotorClient(Config.MONGO_URL)
             self.db = self.client[Config.MONGO_DB_NAME]
             self.collection = self.db.indexed_files

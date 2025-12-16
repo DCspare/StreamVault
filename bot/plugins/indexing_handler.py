@@ -205,7 +205,8 @@ async def send_progress_message(client: Client, message: Message, text: str) -> 
 @Client.on_message(filters.private & filters.command("start"))
 async def handle_start(client: Client, message: Message):
     """Handle /start command"""
-    welcome_text = """👋 **Welcome to Shadow Streamer!**
+    try:
+        welcome_text = """👋 **Welcome to Shadow Streamer!**
 
 Here's what you can do:
 1️⃣ **Send any file** → I'll index it for streaming
@@ -220,13 +221,16 @@ Here's what you can do:
 
 🔗 **Stream Links:** Available after file indexing"""
 
-    await message.reply_text(
-        welcome_text.format(
-            max_size=Config.MAX_FILE_SIZE_MB,
-            max_hours=Config.MAX_VIDEO_DURATION_HOURS
-        ),
-        quote=True
-    )
+        await message.reply_text(
+            welcome_text.format(
+                max_size=Config.MAX_FILE_SIZE_MB,
+                max_hours=Config.MAX_VIDEO_DURATION_HOURS
+            ),
+            quote=True
+        )
+    except Exception as e:
+        logger.error(f"Error in start command: {e}")
+
 
 @Client.on_message(filters.private & filters.command("help"))
 async def handle_help(client: Client, message: Message):
@@ -244,7 +248,8 @@ async def handle_help(client: Client, message: Message):
         client (Client): Pyrogram bot client
         message (Message): User's /help command message
     """
-    help_text = """🆘 **Help - Shadow Streamer Commands**
+    try:
+        help_text = """🆘 **Help - Shadow Streamer Commands**
 
 **📁 File Upload:**
 Send any file → I'll ask for a custom name → File gets indexed and stream link generated
@@ -276,13 +281,15 @@ File too large? → Split into smaller parts
 Download failing? → Wait 1 minute and try again
 Stream buffering? → Try different player or lower quality
 Still stuck? → Contact support""".format(
-        max_size=Config.MAX_FILE_SIZE_MB,
-        max_hours=Config.MAX_VIDEO_DURATION_HOURS,
-        url=Config.URL,
-        log_channel=Config.LOG_CHANNEL_ID
-    )
-    
-    await message.reply_text(help_text, quote=True)
+            max_size=Config.MAX_FILE_SIZE_MB,
+            max_hours=Config.MAX_VIDEO_DURATION_HOURS,
+            url=Config.URL,
+            log_channel=Config.LOG_CHANNEL_ID
+        )
+        
+        await message.reply_text(help_text, quote=True)
+    except Exception as e:
+        logger.error(f"Error in help command: {e}")
 
 @Client.on_message(filters.private & filters.document)
 async def handle_file_upload(client: Client, message: Message):
@@ -305,75 +312,83 @@ async def handle_file_upload(client: Client, message: Message):
         - Store in upload_states dictionary for tracking
         - Send prompt asking for custom name
     """
-    file = message.document
-    if not file:
-        return
-    
-    logger.info(f"File upload received: file_id={file.file_id[:20]}..., size={file.file_size}, user={message.from_user.id}")
-    
-    # Validate file size against configured limit
-    is_valid, error_msg = await validate_file_size(file.file_size)
-    if not is_valid:
-        logger.warning(f"File rejected (too large): {file.file_size} bytes, user={message.from_user.id}")
-        await message.reply_text(error_msg, quote=True)
-        return
-    
-    # Store file info temporarily while waiting for custom name
-    file_info = {
-        "file_id": file.file_id,
-        "file_unique_id": file.file_unique_id,
-        "file_size": file.file_size,
-        "file_name": getattr(file, "file_name", "Unknown"),
-        "mime_type": file.mime_type,
-        "source": "direct_upload"
-    }
-    
-    # Create upload state and store for this user
-    upload_states[message.from_user.id] = UploadState(message, file_info)
-    logger.debug(f"Upload state created for user {message.from_user.id}")
-    
-    # Request custom name from user
-    await message.reply_text(
-        f"✅ **File received!**\n\n"
-        f"📄 **Details:**\n"
-        f"• Name: {file_info['file_name']}\n"
-        f"• Size: {file_info['file_size'] // 1024 // 1024} MB\n\n"
-        f"📝 **Send a custom name for this file** (e.g., \"Avengers_Endgame_720p\")",
-        quote=True
-    )
+    try:
+        file = message.document
+        if not file:
+            return
+        
+        logger.info(f"File upload received: file_id={file.file_id[:20]}..., size={file.file_size}, user={message.from_user.id}")
+        
+        # Validate file size against configured limit
+        is_valid, error_msg = await validate_file_size(file.file_size)
+        if not is_valid:
+            logger.warning(f"File rejected (too large): {file.file_size} bytes, user={message.from_user.id}")
+            await message.reply_text(error_msg, quote=True)
+            return
+        
+        # Store file info temporarily while waiting for custom name
+        file_info = {
+            "file_id": file.file_id,
+            "file_unique_id": file.file_unique_id,
+            "file_size": file.file_size,
+            "file_name": getattr(file, "file_name", "Unknown"),
+            "mime_type": file.mime_type,
+            "source": "direct_upload"
+        }
+        
+        # Create upload state and store for this user
+        upload_states[message.from_user.id] = UploadState(message, file_info)
+        logger.debug(f"Upload state created for user {message.from_user.id}")
+        
+        # Request custom name from user
+        await message.reply_text(
+            f"✅ **File received!**\n\n"
+            f"📄 **Details:**\n"
+            f"• Name: {file_info['file_name']}\n"
+            f"• Size: {file_info['file_size'] // 1024 // 1024} MB\n\n"
+            f"📝 **Send a custom name for this file** (e.g., \"Avengers_Endgame_720p\")",
+            quote=True
+        )
+    except Exception as e:
+        logger.error(f"Error in file upload handler: {e}", exc_info=True)
+
 
 @Client.on_message(filters.private & filters.text)
 async def handle_text_messages(client: Client, message: Message):
     """Handle text messages (YouTube URLs and custom names)"""
-    user_id = message.from_user.id
-    
-    # Check if this is a custom name for a file upload
-    if user_id in upload_states:
-        state = upload_states[user_id]
-        custom_name = message.text.strip()
+    try:
+        user_id = message.from_user.id
         
-        if not custom_name:
-            await message.reply_text("❌ Invalid name. Please send a valid custom name.", quote=True)
+        # Check if this is a custom name for a file upload
+        if user_id in upload_states:
+            state = upload_states[user_id]
+            custom_name = message.text.strip()
+            
+            if not custom_name:
+                await message.reply_text("❌ Invalid name. Please send a valid custom name.", quote=True)
+                return
+            
+            # Process the file upload with custom name
+            await process_file_upload(client, state, custom_name)
+            
+            # Clean up upload state
+            del upload_states[user_id]
             return
         
-        # Process the file upload with custom name
-        await process_file_upload(client, state, custom_name)
+        # Check if this is a YouTube URL
+        if is_youtube_url(message.text):
+            await handle_youtube_download(client, message)
+            return
         
-        # Clean up upload state
-        del upload_states[user_id]
-        return
-    
-    # Check if this is a YouTube URL
-    if is_youtube_url(message.text):
-        await handle_youtube_download(client, message)
-        return
-    
-    # Unknown text message
-    await message.reply_text(
-        "❓ Send me a **file** or **YouTube link** to get started!\n"
-        "Use /help for more information.",
-        quote=True
-    )
+        # Unknown text message
+        await message.reply_text(
+            "❓ Send me a **file** or **YouTube link** to get started!\n"
+            "Use /help for more information.",
+            quote=True
+        )
+    except Exception as e:
+        logger.error(f"Error in text message handler: {e}", exc_info=True)
+
 
 async def process_file_upload(client: Client, state: UploadState, custom_name: str):
     """Process file upload with custom name"""
