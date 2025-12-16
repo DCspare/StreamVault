@@ -1,3 +1,12 @@
+---
+license: mit
+title: StreamVault
+sdk: docker
+emoji: 🌍
+colorFrom: indigo
+colorTo: purple
+---
+
 # 🎥 Shadow Streamer (The Zero-Budget Media Ecosystem) 
 
 > **A Unified Telegram Bot. Architecture for High-Speed Media Streaming inside and outside Telegram.**
@@ -7,7 +16,7 @@
 [![Database](https://img.shields.io/badge/MongoDB-Atlas-green?style=for-the-badge&logo=mongodb)](https://www.mongodb.com/)
 [![License](https://img.shields.io/badge/License-MIT-red?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-## 📖 Overview
+## 📖 Overview.
 
 **Shadow Streamer** is an advanced engineering solution designed to turn a Telegram Channel into a functional Media Server (like a personal Netflix) with a **$0.00 operational cost**. 
 
