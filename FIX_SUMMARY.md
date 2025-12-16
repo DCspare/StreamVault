@@ -1,4 +1,4 @@
-# Fix Summary: OFFSET_INVALID Error in Streaming Handler
+# Fix Summary: OFFSET_INVALID Error in Streaming Handler.
 
 ## Problem
 When accessing streaming links (`/stream/{chat_id}/{message_id}`), the bot was throwing:
