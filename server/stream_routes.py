@@ -1,3 +1,14 @@
+"""
+HTTP Streaming Routes for Shadow Streamer.
+
+Provides RESTful API endpoints for streaming Telegram files:
+- /stream/{chat_id}/{message_id} - Stream file with HTTP 206 support
+- Handles byte-range requests for seeking
+- Auto-heals expired file references
+- Implements exponential backoff for timeouts
+- Supports all media types (video, audio, documents)
+"""
+
 import mimetypes
 import logging
 import asyncio
@@ -16,55 +27,120 @@ stream_router = APIRouter()
 
 @stream_router.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request: Request, chat_id: int, message_id: int):
+    """
+    Stream a file from Telegram as an HTTP response.
+    
+    Supports HTTP byte-range requests (206 Partial Content) for:
+    - Seeking/scrubbing in video players
+    - Resuming interrupted downloads
+    - Playing in browser without downloading entire file
+    
+    Args:
+        request (Request): FastAPI request object
+        chat_id (int): Telegram chat ID (log channel)
+        message_id (int): Telegram message ID in log channel
+        
+    Returns:
+        StreamingResponse: Streamed file data with proper headers
+        JSONResponse: Error response if bot disconnected or file not found
+        
+    Status Codes:
+        206: Partial Content (success)
+        400: Bad Request (invalid message/file)
+        404: Not Found (message/media not found)
+        503: Service Unavailable (bot disconnected)
+        
+    Example:
+        GET /stream/5228293685/159 HTTP/1.1
+        Range: bytes=1540096-
+        
+        Response:
+        206 Partial Content
+        Content-Range: bytes 1540096-1574506/1574507
+        Content-Type: video/mp4
+    """
+    # Ensure bot is connected before attempting to fetch
     if not bot_app.is_connected:
+        logger.warning("Bot not connected, attempting to start...")
         try:
             await bot_app.start()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to start bot: {e}")
             return JSONResponse(status_code=503, content={"error": "Bot Disconnected"})
 
     try:
+        # Fetch message from Telegram (contains file metadata)
+        logger.debug(f"Fetching message: chat_id={chat_id}, message_id={message_id}")
         message = await bot_app.get_messages(chat_id, message_id)
         if not message or not message.media:
+            logger.warning(f"Message not found or has no media: chat_id={chat_id}, message_id={message_id}")
             raise HTTPException(status_code=404)
 
+        # Extract file and its properties
         file = message.document or message.video or message.audio
         file_size = file.file_size
         file_name = getattr(file, "file_name", "video.mp4")
+        
+        # Determine MIME type for proper browser handling
         mime_type, _ = mimetypes.guess_type(file_name)
         if not mime_type:
             mime_type = "application/octet-stream"
+        
+        logger.debug(f"File metadata: name={file_name}, size={file_size}, type={mime_type}")
 
-    except Exception:
+    except Exception as e:
+        # Failed to fetch file metadata
+        logger.error(f"Meta fetch failed for chat_id={chat_id}, message_id={message_id}: {e}")
         raise HTTPException(status_code=400, detail="Meta fetch failed")
 
+    # Parse HTTP Range header for partial content requests
+    # Format: "bytes=start-end" (e.g., "bytes=0-1023" or "bytes=1024-")
     range_header = request.headers.get("Range")
     start, end = 0, file_size - 1
     if range_header:
         parsed = parse_range(range_header, file_size)
         if parsed:
             start, end = parsed
+            logger.debug(f"Range header parsed: {range_header} -> start={start}, end={end}")
 
+    # Calculate content length for this chunk
     content_length = (end - start) + 1
 
+    # Convert byte offset to 1MB chunk offset
+    # Telegram API uses 1MB chunks internally
+    # chunk_offset = which 1MB chunk to start from
+    # initial_skip = bytes to skip within that chunk
     initial_chunk_offset = start // (1024 * 1024)
     initial_skip = start % (1024 * 1024)
 
     logger.info(
-        "Stream request chat_id=%s message_id=%s range=%s start=%s end=%s size=%s chunk_offset=%s skip=%s",
-        chat_id,
-        message_id,
-        range_header,
-        start,
-        end,
-        file_size,
-        initial_chunk_offset,
-        initial_skip,
+        f"Stream request: chat_id={chat_id}, message_id={message_id}, "
+        f"range={range_header}, start={start}, end={end}, size={file_size}, "
+        f"chunk_offset={initial_chunk_offset}, skip={initial_skip}"
     )
 
     async def media_stream_generator():
+        """
+        Generator function that yields file chunks from Telegram.
+        
+        Handles:
+        - Byte-range requests (HTTP 206)
+        - Chunk offset calculations (1MB chunks)
+        - Timeout retries with exponential backoff
+        - Session reconnection on token expiry
+        - First chunk skipping for range requests
+        
+        Yields:
+            bytes: File data chunks to send to client
+            
+        Error Recovery:
+        - OffsetInvalid/FileReferenceExpired: Refresh message and retry
+        - TimeoutError: Exponential backoff (1s, 2s, 4s, 8s, 16s, 30s max)
+        - OSError: Network errors with same backoff strategy
+        """
         nonlocal message
 
-        CHUNK_SIZE = 1024 * 1024
+        CHUNK_SIZE = 1024 * 1024  # 1MB - Telegram's internal chunk size
         current_byte_offset = start
         bytes_left = content_length
 
@@ -117,58 +193,68 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
                 timeout_failures = 0
 
             except (OffsetInvalid, FileReferenceExpired):
+                # Token expired or offset invalid - refresh message
+                # This happens when session token expires or file reference changes
                 logger.warning("⚠️ File ref/offset invalid. Refreshing message...")
                 await asyncio.sleep(1)
 
                 try:
                     message = await bot_app.get_messages(chat_id, message_id)
-                except Exception:
+                    logger.info("Message refreshed successfully")
+                except Exception as e:
+                    logger.error(f"Failed to refresh message: {e}")
                     break
 
                 timeout_failures = 0
 
             except TimeoutError as e:
+                # GetFile timeout - retry with exponential backoff
+                # Happens on slow networks or Telegram server issues
                 timeout_failures += 1
                 if timeout_failures > 6:
-                    logger.error("Stream failed after repeated timeouts: %s", e)
+                    logger.error(f"Stream failed after repeated timeouts: {e}")
                     break
 
+                # Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (max)
                 backoff = min(2 ** (timeout_failures - 1), 30)
                 logger.warning(
-                    "⚠️ GetFile timeout (attempt %s). Backing off %ss...",
-                    timeout_failures,
-                    backoff,
+                    f"⚠️ GetFile timeout (attempt {timeout_failures}). "
+                    f"Backing off {backoff}s..."
                 )
                 await asyncio.sleep(backoff)
 
             except OSError as e:
+                # Network error - retry with exponential backoff
+                # Covers connection reset, socket errors, etc.
                 timeout_failures += 1
                 if timeout_failures > 6:
-                    logger.error("Stream failed after repeated network errors: %s", e)
+                    logger.error(f"Stream failed after repeated network errors: {e}")
                     break
 
                 backoff = min(2 ** (timeout_failures - 1), 30)
                 logger.warning(
-                    "⚠️ GetFile network error (attempt %s): %s. Backing off %ss...",
-                    timeout_failures,
-                    e,
-                    backoff,
+                    f"⚠️ GetFile network error (attempt {timeout_failures}): {e}. "
+                    f"Backing off {backoff}s..."
                 )
                 await asyncio.sleep(backoff)
 
             except Exception as e:
-                logger.error("Stream broken: %s", e)
+                # Unexpected error - log and exit
+                logger.error(f"Stream broken: {e}", exc_info=True)
                 break
 
+    # Prepare response headers for HTTP 206 Partial Content
     headers = {
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
-        "Accept-Ranges": "bytes",
-        "Content-Disposition": f'inline; filename="{file_name}"',
+        "Content-Range": f"bytes {start}-{end}/{file_size}",  # Tell client which bytes we're sending
+        "Accept-Ranges": "bytes",  # Tell client we support range requests
+        "Content-Disposition": f'inline; filename="{file_name}"',  # Suggest filename for download
     }
 
+    logger.debug(f"Returning StreamingResponse with headers: {headers}")
+    
     return StreamingResponse(
         media_stream_generator(),
-        status_code=206,
+        status_code=206,  # 206 Partial Content (required for range requests)
         headers=headers,
         media_type=mime_type,
     )
