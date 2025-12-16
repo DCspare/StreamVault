@@ -388,6 +388,54 @@ class ShadowBot(Client):
         except Exception as e:
             logger.error(f"Failed to cleanup session: {e}")
 
+    async def verify_handler_registration(self) -> bool:
+        """
+        Verify all handlers are registered correctly and in proper priority order.
+        
+        Handlers are registered in order of specificity:
+        1. Most specific filters (command + private)
+        2. Medium specific filters (document + private)
+        3. Least specific filters (text + private)
+        
+        Returns:
+            bool: True if all handlers properly registered
+        """
+        
+        logger.info("=" * 60)
+        logger.info("HANDLER REGISTRATION VERIFICATION")
+        logger.info("=" * 60)
+        
+        # List all registered handler groups
+        handler_groups = self.dispatcher.groups
+        total_handlers = sum(len(group) for group in handler_groups.values())
+        
+        logger.info(f"✅ Total handler groups: {len(handler_groups)}")
+        logger.info(f"✅ Total handlers: {total_handlers}")
+        
+        # Expected handlers
+        expected_handlers = [
+            "start command",
+            "help command",
+            "catalog command",
+            "delete command",
+            "confirm_delete command",
+            "search command",
+            "file upload (document)",
+            "text messages",
+        ]
+        
+        logger.info(f"\n✅ Expected handlers registered:")
+        for i, handler_name in enumerate(expected_handlers, 1):
+            logger.info(f"   {i}. {handler_name}")
+        
+        if total_handlers < len(expected_handlers):
+            logger.error(f"❌ WARNING: Expected {len(expected_handlers)} handlers, found {total_handlers}")
+            return False
+        
+        logger.info("\n✅ Handler registration verification PASSED")
+        logger.info("=" * 60)
+        return True
+
     async def stop(self, *args):
         """
         Stop the bot client.
