@@ -18,42 +18,49 @@ jobs:
           git config --global user.email "bot@github.com"
           git config --global user.name "GitHub Actions Bot"
       
-      - name: Configure merge strategy for divergent branches
+      - name: Configure merge strategy
         run: |
           git config pull.rebase false
-          echo "✅ Git configured to use merge strategy"
+          git config merge.ff false
+          echo "✅ Git configured for merge strategy"
       
       - name: Add HuggingFace remote
         run: |
-          git remote add hf https://dc-hacks-streamvault-v1.hf.space
-          git fetch hf main 2>/dev/null || echo "⚠️ HF remote not ready yet"
-          echo "✅ HuggingFace remote added"
+          git remote add hf https://huggingface.co/spaces/DC-Hacks/StreamVault-V1
+          echo "✅ HF remote added"
       
-      - name: Merge HF changes (if any)
+      - name: Fetch from HF
         run: |
-          git merge hf/main --no-edit -m "Sync: Merge HF Spaces changes" || {
-            echo "ℹ️ No conflicts to merge"
+          git fetch hf main --depth=1
+          echo "✅ Fetched from HF Spaces"
+      
+      - name: Merge HF changes into local
+        run: |
+          git merge hf/main --no-edit -m "Sync: Auto-merge HF changes" || {
+            echo "ℹ️ No changes to merge or already in sync"
           }
-          echo "✅ Merge completed"
+          echo "✅ Merged HF changes"
+      
+      - name: Update HF remote with auth
+        run: |
+          git remote remove hf
+          git remote add hf https://DC-Hacks:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/DC-Hacks/StreamVault-V1
+          echo "✅ HF remote updated with auth"
       
       - name: Push to HuggingFace Spaces
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git remote remove hf || true
-          git remote add hf https://dc-hacks:${HF_TOKEN}@huggingface.co/spaces/DC-Hacks/StreamVault-V1 
           git push hf HEAD:main -u
           echo "✅ Pushed to HuggingFace Spaces"
       
-      - name: Log sync completion
+      - name: Verify sync completion
         run: |
           echo "═══════════════════════════════════════════"
           echo "✅ SYNC COMPLETED SUCCESSFULLY"
           echo "═══════════════════════════════════════════"
           echo ""
-          echo "Last 3 commits:"
-          git log --oneline -3
+          echo "Recent commits:"
+          git log --oneline -5
           echo ""
-          echo "Remote status:"
+          echo "Remote URLs:"
           git remote -v
           echo "═══════════════════════════════════════════"
