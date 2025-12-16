@@ -1,3 +1,14 @@
+"""
+Shadow Bot Client - Pyrogram Client with Session Pooling.
+
+Custom Pyrogram client that:
+- Uses SOCKS5 proxy for network bypass
+- Implements session pooling per DC for parallel downloads
+- Overrides get_file() for direct session pool usage
+- Handles auth key persistence and flood wait recovery
+- Auto-cleans corrupt session files
+"""
+
 import os
 import logging
 import asyncio
@@ -19,14 +30,15 @@ from bot.session_pool import SessionPool
 logger = logging.getLogger("bot_client")
 
 if not Config.API_ID or not Config.API_HASH or not Config.BOT_TOKEN:
-    logger.error("🚫 CONFIG MISSING")
+    logger.error("🚫 CONFIG MISSING: API_ID, API_HASH, or BOT_TOKEN not set")
 
 # 🛠️ PROXY CONFIG
+# SOCKS5 proxy for network bypass on restricted networks
 proxy_config = dict(
     scheme="socks5",
     hostname="37.18.73.60",  # proxydb.net socks5 high anonymous
     port=5566,
-    # username="fbvilezw",
+    # username="fbvilezw",  # Uncomment if proxy requires auth
     # password="qhfflj8i2rzg"
 )
 
@@ -34,37 +46,86 @@ SESSION_NAME = "streamvault_v1"
 
 
 class ShadowBot(Client):
+    """
+    Custom Pyrogram Client with session pooling and auto-recovery.
+    
+    Features:
+    - Automatic plugin loading from bot/plugins directory
+    - Session persistence to disk (prevents re-auth loops)
+    - FloodWait handling with automatic retry
+    - Corrupt session file detection and cleanup
+    - Session pool for parallel downloads across DCs
+    - SOCKS5 proxy support for network bypass
+    
+    Attributes:
+        is_enabled (bool): Bot enabled flag
+        is_connected (bool): Telegram connection status
+        session_pool (SessionPool): DC-specific session manager
+    """
+    
     def __init__(self):
+        """
+        Initialize Shadow Bot client with proxy and persistence.
+        
+        Sets up:
+        - Session persistence (in_memory=False)
+        - Plugin auto-loading (plugins=dict(root="bot/plugins"))
+        - SOCKS5 proxy configuration
+        - Corrupt session cleanup
+        - Session pool initialization
+        """
         self.is_enabled = True
         self.is_connected = False
 
         # 🗑️ AUTO-CLEANUP CORRUPT FILES
+        # Remove empty session files to prevent auth errors
         if os.path.exists(f"{SESSION_NAME}.session"):
             if os.path.getsize(f"{SESSION_NAME}.session") == 0:
+                logger.warning("Corrupt session file detected, removing...")
                 os.remove(f"{SESSION_NAME}.session")
 
+        logger.info("Initializing ShadowBot client")
+        logger.debug(f"Config: API_ID={Config.API_ID}, session={SESSION_NAME}, proxy={proxy_config['hostname']}:{proxy_config['port']}")
+        
         super().__init__(
             SESSION_NAME,
             api_id=Config.API_ID,
             api_hash=Config.API_HASH,
             bot_token=Config.BOT_TOKEN,
-            plugins=dict(root="bot/plugins"),
+            plugins=dict(root="bot/plugins"),  # Auto-load all plugins
             # STABILITY SETTINGS
-            workers=4,
-            ipv6=False,
+            workers=4,  # Concurrent update handlers
+            ipv6=False,  # IPv4 only for compatibility
             # PERSISTENCE
-            in_memory=False,
-            workdir=".",
-            proxy=proxy_config,
+            in_memory=False,  # Save session to disk
+            workdir=".",  # Session file location
+            proxy=proxy_config,  # SOCKS5 proxy
         )
         self.session_pool = SessionPool(self)
+        logger.info("✅ ShadowBot client initialized")
 
     async def start(self):
+        """
+        Start the bot with auto-recovery from common errors.
+        
+        Handles:
+        - FloodWait errors with automatic retry
+        - Corrupt session database errors
+        - Connection failures with cleanup
+        
+        Sets is_connected=True on successful connection.
+        
+        Raises:
+            Exception: If connection fails after recovery attempts
+        """
         try:
+            logger.info("Starting bot connection to Telegram...")
             await super().start()
             self.is_connected = True
+            logger.info("✅ Bot connected successfully")
 
-        # 🛑 FLOOD WAIT HANDLER (The Fix)
+        # 🛑 FLOOD WAIT HANDLER
+        # Telegram rate limit - wait and retry
         except FloodWait as e:
             wait_time = e.value + 5
             logger.warning(f"⚠️ Telegram FLOOD_WAIT: Sleeping for {wait_time}s...")
@@ -72,13 +133,18 @@ class ShadowBot(Client):
 
             await super().start()
             self.is_connected = True
+            logger.info("✅ Bot connected after FloodWait")
 
         except Exception as e:
-            logger.error(f"⚠️ Start Error: {e}")
+            logger.error(f"⚠️ Start Error: {e}", exc_info=True)
+            
+            # Handle session database corruption
             if "database is locked" in str(e) or "no such table" in str(e):
+                logger.warning("Session database corrupt, cleaning up...")
                 self.cleanup_session()
                 await super().start()
                 self.is_connected = True
+                logger.info("✅ Bot connected after session cleanup")
 
     async def get_file(
         self,
@@ -89,6 +155,34 @@ class ShadowBot(Client):
         progress: Callable = None,
         progress_args: tuple = (),
     ) -> Optional[AsyncGenerator[bytes, None]]:
+        """
+        Download file from Telegram using session pool.
+        
+        Overrides Pyrogram's get_file to use our session pool for:
+        - Parallel downloads across DCs
+        - Better timeout handling
+        - Session reuse
+        
+        CRITICAL: offset and limit are in 1MB chunks, NOT bytes!
+        - offset: Number of 1MB chunks to skip
+        - limit: Number of 1MB chunks to download
+        
+        Args:
+            file_id (FileId): Pyrogram file identifier
+            file_size (int): Total file size in bytes (optional)
+            limit (int): Number of 1MB chunks to download (0 = all)
+            offset (int): Number of 1MB chunks to skip from start
+            progress (Callable): Progress callback function
+            progress_args (tuple): Additional args for progress callback
+            
+        Yields:
+            bytes: File data chunks (1MB each)
+            
+        Example:
+            >>> async for chunk in bot.get_file(file_id, offset=10, limit=5):
+            ...     # Skips first 10MB, downloads next 5MB
+            ...     process_chunk(chunk)
+        """
         async with self.get_file_semaphore:
             file_type = file_id.file_type
 
@@ -281,13 +375,26 @@ class ShadowBot(Client):
                 await self.session_pool.release_session(session)
 
     def cleanup_session(self):
+        """
+        Remove corrupt session file from disk.
+        
+        Called when session database is corrupted or locked.
+        Forces bot to create new auth key on next start.
+        """
         try:
             if os.path.exists(f"{SESSION_NAME}.session"):
+                logger.info(f"Removing session file: {SESSION_NAME}.session")
                 os.remove(f"{SESSION_NAME}.session")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to cleanup session: {e}")
 
     async def stop(self, *args):
+        """
+        Stop the bot client.
+        
+        Override to prevent accidental disconnection during streaming.
+        Currently a no-op to keep bot alive during web server shutdown.
+        """
         pass
 
 

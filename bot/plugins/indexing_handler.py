@@ -1,3 +1,17 @@
+"""
+File Indexing Handler Plugin for Shadow Streamer.
+
+This plugin handles:
+- Direct file uploads with custom naming
+- YouTube video downloads with progress tracking
+- Catalog browsing and pagination
+- File deletion (soft delete)
+- File search by name
+
+All uploaded files are forwarded to LOG_CHANNEL and indexed in MongoDB
+for persistent storage and streaming access.
+"""
+
 import os
 import asyncio
 import re
@@ -31,6 +45,21 @@ YOUTUBE_PATTERNS = [
 upload_states = {}
 
 class UploadState:
+    """
+    Temporary state tracker for multi-step file upload process.
+    
+    Workflow:
+    1. User sends file → State created
+    2. Bot asks for custom name
+    3. User sends name → State retrieved and processed
+    4. State deleted after completion
+    
+    Attributes:
+        message (Message): Original file upload message
+        file_info (Dict): File metadata (ID, size, MIME type, etc.)
+        custom_name (str): User-provided custom name (set later)
+        created_at (datetime): State creation timestamp
+    """
     def __init__(self, message: Message, file_info: Dict[str, Any]):
         self.message = message
         self.file_info = file_info
@@ -38,14 +67,52 @@ class UploadState:
         self.created_at = datetime.utcnow()
 
 def is_youtube_url(text: str) -> bool:
-    """Check if text contains a YouTube URL"""
+    """
+    Check if text contains a YouTube URL.
+    
+    Supports standard YouTube URL formats:
+    - youtube.com/watch?v=VIDEO_ID
+    - youtu.be/VIDEO_ID
+    - youtube.com/embed/VIDEO_ID
+    - youtube.com/shorts/VIDEO_ID
+    
+    Args:
+        text (str): Text to check for YouTube URL
+        
+    Returns:
+        bool: True if YouTube URL detected, False otherwise
+        
+    Example:
+        >>> is_youtube_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        True
+        >>> is_youtube_url("Just some text")
+        False
+    """
     if not text:
         return False
     
     return any(re.match(pattern, text, re.IGNORECASE) for pattern in YOUTUBE_PATTERNS)
 
 async def validate_file_size(file_size: int) -> tuple[bool, Optional[str]]:
-    """Validate file size against limits"""
+    """
+    Validate file size against configured limits.
+    
+    Prevents Telegram upload timeouts by rejecting files over MAX_FILE_SIZE.
+    
+    Args:
+        file_size (int): File size in bytes
+        
+    Returns:
+        tuple: (is_valid, error_message)
+            - is_valid (bool): True if file is within limits
+            - error_message (str): User-friendly error message if invalid, None if valid
+            
+    Example:
+        >>> await validate_file_size(100 * 1024 * 1024)  # 100MB
+        (True, None)
+        >>> await validate_file_size(600 * 1024 * 1024)  # 600MB
+        (False, "File too large: 600MB...")
+    """
     if file_size > MAX_FILE_SIZE:
         size_mb = file_size // 1024 // 1024
         return False, f"File too large: {size_mb}MB\n⚠️ Maximum size: {Config.MAX_FILE_SIZE_MB}MB (prevents timeout)\n💡 Suggestion: Split the file or use external hosting"
@@ -163,7 +230,20 @@ Here's what you can do:
 
 @Client.on_message(filters.private & filters.command("help"))
 async def handle_help(client: Client, message: Message):
-    """Handle /help command"""
+    """
+    Handle /help command.
+    
+    Displays comprehensive bot usage instructions including:
+    - File upload process
+    - YouTube download feature
+    - Catalog management commands
+    - Stream link format
+    - File limits and troubleshooting
+    
+    Args:
+        client (Client): Pyrogram bot client
+        message (Message): User's /help command message
+    """
     help_text = """🆘 **Help - Shadow Streamer Commands**
 
 **📁 File Upload:**
@@ -173,42 +253,72 @@ Send any file → I'll ask for a custom name → File gets indexed and stream li
 Send YouTube URL → I'll download and archive it → Stream link generated
 
 **📚 Catalog Management:**
-`/catalog` - View all indexed files
-`/delete [message_id]` - Remove file from archive
-`/search [query]` - Search files by name
+`/catalog` - View all indexed files with pagination
+`/delete [message_id]` - Remove file from archive (soft delete)
+`/search [query]` - Search files by name using keywords
 
 **🔗 Stream Links:**
-Format: `https://yourbot.hf.space/stream/[message_id]`
+Format: `https://yourbot.hf.space/stream/[chat_id]/[message_id]`
+Example: `{url}/stream/{log_channel}/159`
+
+Links support:
+• Browser playback (Chrome, Firefox, Safari)
+• Media players (VLC, MPV)
+• HTTP byte-range requests (seeking/scrubbing)
 
 **⚠️ File Limits:**
-• Maximum size: {max_size}MB
+• Maximum size: {max_size}MB (prevents Telegram timeout)
 • Maximum duration: {max_hours} hours
 • Supported: videos, audio, documents
 
 **❓ Need Help?**
 File too large? → Split into smaller parts
 Download failing? → Wait 1 minute and try again
+Stream buffering? → Try different player or lower quality
 Still stuck? → Contact support""".format(
         max_size=Config.MAX_FILE_SIZE_MB,
-        max_hours=Config.MAX_VIDEO_DURATION_HOURS
+        max_hours=Config.MAX_VIDEO_DURATION_HOURS,
+        url=Config.URL,
+        log_channel=Config.LOG_CHANNEL_ID
     )
     
     await message.reply_text(help_text, quote=True)
 
 @Client.on_message(filters.private & filters.document)
 async def handle_file_upload(client: Client, message: Message):
-    """Handle direct file uploads"""
+    """
+    Handle direct file uploads from users.
+    
+    Workflow:
+    1. User sends a file to the bot
+    2. Bot validates file size (max 500MB by default)
+    3. Bot asks user for a custom name
+    4. Bot stores upload state temporarily awaiting custom name
+    
+    Args:
+        client (Client): Pyrogram bot client
+        message (Message): User's file upload message
+        
+    Flow:
+        - Extract file metadata (size, name, ID)
+        - Check against MAX_FILE_SIZE limit
+        - Store in upload_states dictionary for tracking
+        - Send prompt asking for custom name
+    """
     file = message.document
     if not file:
         return
     
-    # Validate file size
+    logger.info(f"File upload received: file_id={file.file_id[:20]}..., size={file.file_size}, user={message.from_user.id}")
+    
+    # Validate file size against configured limit
     is_valid, error_msg = await validate_file_size(file.file_size)
     if not is_valid:
+        logger.warning(f"File rejected (too large): {file.file_size} bytes, user={message.from_user.id}")
         await message.reply_text(error_msg, quote=True)
         return
     
-    # Store upload state
+    # Store file info temporarily while waiting for custom name
     file_info = {
         "file_id": file.file_id,
         "file_unique_id": file.file_unique_id,
@@ -218,9 +328,11 @@ async def handle_file_upload(client: Client, message: Message):
         "source": "direct_upload"
     }
     
+    # Create upload state and store for this user
     upload_states[message.from_user.id] = UploadState(message, file_info)
+    logger.debug(f"Upload state created for user {message.from_user.id}")
     
-    # Request custom name
+    # Request custom name from user
     await message.reply_text(
         f"✅ **File received!**\n\n"
         f"📄 **Details:**\n"

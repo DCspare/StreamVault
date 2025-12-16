@@ -1,15 +1,45 @@
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger("config")
+
 
 class Config:
+    """
+    Configuration manager for Shadow Streamer.
+    
+    Loads all environment variables and provides type-safe accessors.
+    Validates critical config values at startup.
+    """
+    
     def get_env(key, default=""):
+        """
+        Get string environment variable.
+        
+        Args:
+            key (str): Environment variable name
+            default (str): Default value if not found
+            
+        Returns:
+            str: Environment variable value (trimmed) or default
+        """
         value = os.environ.get(key, default)
         return value.strip() if value else default
 
     def get_int_env(key, default=0):
+        """
+        Get integer environment variable.
+        
+        Args:
+            key (str): Environment variable name
+            default (int): Default value if not found or invalid
+            
+        Returns:
+            int: Parsed integer value or default
+        """
         val = os.environ.get(key)
         if not val or not val.strip().isdigit():
             return default
@@ -42,10 +72,24 @@ class Config:
 
     @classmethod
     def is_valid(cls):
+        """
+        Validate critical configuration values.
+        
+        Checks that:
+        - Telegram API credentials are present
+        - Bot token is configured
+        - Log channel ID is set (required for indexing)
+        
+        Returns:
+            bool: True if all required config present, False otherwise
+        """
         if cls.API_ID == 0 or not cls.API_HASH or not cls.BOT_TOKEN:
-            print("⚠️ WARNING: Bot config missing.")
+            logger.error("⚠️ WARNING: Bot config missing (API_ID, API_HASH, or BOT_TOKEN)")
             return False
         if not cls.LOG_CHANNEL_ID:
-            print("⚠️ WARNING: LOG_CHANNEL_ID missing - indexing disabled.")
+            logger.warning("⚠️ WARNING: LOG_CHANNEL_ID missing - indexing disabled")
             return False
+        
+        logger.info("✅ Configuration validated successfully")
+        logger.debug(f"Config: API_ID={cls.API_ID}, LOG_CHANNEL_ID={cls.LOG_CHANNEL_ID}, MAX_FILE_SIZE={cls.MAX_FILE_SIZE_MB}MB")
         return True
