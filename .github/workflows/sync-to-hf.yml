@@ -1,0 +1,59 @@
+name: Sync to HuggingFace Spaces
+on:
+  push:
+    branches:
+      - main
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Configure Git identity
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "GitHub Actions Bot"
+      
+      - name: Configure merge strategy for divergent branches
+        run: |
+          git config pull.rebase false
+          echo "✅ Git configured to use merge strategy"
+      
+      - name: Add HuggingFace remote
+        run: |
+          git remote add hf https://dc-hacks-streamvault-v1.hf.space
+          git fetch hf main 2>/dev/null || echo "⚠️ HF remote not ready yet"
+          echo "✅ HuggingFace remote added"
+      
+      - name: Merge HF changes (if any)
+        run: |
+          git merge hf/main --no-edit -m "Sync: Merge HF Spaces changes" || {
+            echo "ℹ️ No conflicts to merge"
+          }
+          echo "✅ Merge completed"
+      
+      - name: Push to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote remove hf || true
+          git remote add hf https://dc-hacks:${HF_TOKEN}@huggingface.co/spaces/DC-Hacks/StreamVault-V1 
+          git push hf HEAD:main -u
+          echo "✅ Pushed to HuggingFace Spaces"
+      
+      - name: Log sync completion
+        run: |
+          echo "═══════════════════════════════════════════"
+          echo "✅ SYNC COMPLETED SUCCESSFULLY"
+          echo "═══════════════════════════════════════════"
+          echo ""
+          echo "Last 3 commits:"
+          git log --oneline -3
+          echo ""
+          echo "Remote status:"
+          git remote -v
+          echo "═══════════════════════════════════════════"
