@@ -7,6 +7,7 @@ from pyrogram import idle
 from config import Config
 from bot.client import bot_app
 from server.stream_routes import stream_router
+from utils.database import db
 
 # Setup Logging
 logging.basicConfig(
@@ -45,6 +46,15 @@ async def main():
     if not bot_app.is_enabled:
         return
 
+    # 0. Initialize Database Connection
+    logger.info("--- 💾 Connecting to Database... ---")
+    try:
+        await db.connect()
+        logger.info("--- ✅ Database Connected ---")
+    except Exception as e:
+        logger.error(f"--- ❌ Database Failed: {e} ---")
+        # Continue without database - indexing features will be disabled
+
     # 1. Start the Bot FIRST
     logger.info("--- 🤖 Connecting to Telegram... ---")
     try:
@@ -59,11 +69,17 @@ async def main():
     # 2. Start the Web Server SECOND
     logger.info("--- 🚀 Starting Web Server ---")
     
-    # We run both the "idle" (which keeps bot alive) and "server" (web) at the same time
-    await asyncio.gather(
-        start_web_server(),
-        idle()  # This creates the 'Keep-Alive' loop for Pyrogram
-    )
+    try:
+        # We run both the "idle" (which keeps bot alive) and "server" (web) at the same time
+        await asyncio.gather(
+            start_web_server(),
+            idle()  # This creates the 'Keep-Alive' loop for Pyrogram
+        )
+    except Exception as e:
+        logger.error(f"--- ❌ Server Error: {e} ---")
+    finally:
+        # Cleanup database connection
+        await db.disconnect()
 
     await bot_app.stop()
 
