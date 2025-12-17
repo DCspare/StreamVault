@@ -152,13 +152,21 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
 async def forward_to_log_channel(client: Client, message: Message) -> Optional[int]:
     """Forward file to log channel and return message ID"""
     try:
-        # Copy the message (preserves all file data)
-        forwarded = await client.copy_message(
+        # Use forward_messages instead of copy_message
+        # This is the proper way and respects permissions better
+        forwarded_messages = await client.forward_messages(
             chat_id=Config.LOG_CHANNEL_ID,
             from_chat_id=message.chat.id,
-            message_id=message.id
+            message_ids=message.id
         )
-        return forwarded.id
+        
+        if forwarded_messages:
+            logger.info(f"✅ Message forwarded successfully: {forwarded_messages[0].id}")
+            return forwarded_messages[0].id
+        else:
+            logger.error(f"Forward returned empty result")
+            return None
+            
     except FloodWait as e:
         logger.warning(f"Flood wait during forward: {e.value}s")
         await asyncio.sleep(e.value + 5)
