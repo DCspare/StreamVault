@@ -150,7 +150,6 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
         return False, f"❌ Download failed\n🔄 Reason: Unable to fetch video info\n💡 Try again in 1 minute", None
 
 async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
-async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
     """
     Forward file to log channel using copy() method.
     Includes logic to refresh session cache via get_dialogs if ID is not found.
