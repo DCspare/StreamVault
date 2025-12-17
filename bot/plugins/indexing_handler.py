@@ -127,13 +127,24 @@ async def validate_file_size(file_size: int) -> tuple[bool, Optional[str]]:
     return True, None
 
 async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optional[Dict]]:
-    """Validate YouTube video before download"""
+    """Validate YouTube video before download with Cloud-fixes (IPv4/Proxy)"""
+    
+    # 1. Base Options: Force IPv4 to fix "[Errno -5]" DNS errors
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
+        'force_ipv4': True,      # CRITICAL FIX for Cloud Containers
+        'geo_bypass': True,
+        'nocheckcertificate': True
     }
     
+    # 2. Proxy Check: Load PROXY_URL from secrets/env if available
+    # Set this in your HF Secrets as: http://user:pass@ip:port
+    proxy_url = os.environ.get("PROXY_URL") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        ydl_opts['proxy'] = proxy_url
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -142,18 +153,19 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
             duration = info.get('duration', 0)
             if duration > MAX_DURATION:
                 hours = duration // 3600
-                return False, f"Video too long: {hours}h {(duration % 3600) // 60}m\n⚠️ Maximum duration: {Config.MAX_VIDEO_DURATION_HOURS} hours", None
+                return False, f"Video too long: {hours}h {(duration % 3600) // 60}m\n⚠️ Limit: {Config.MAX_VIDEO_DURATION_HOURS}h", None
             
             # Check file size (if available)
             filesize = info.get('filesize') or info.get('filesize_approx', 0)
             if filesize and filesize > MAX_FILE_SIZE:
                 size_mb = filesize // 1024 // 1024
-                return False, f"Video too large: {size_mb}MB\n⚠️ Maximum size: {Config.MAX_FILE_SIZE_MB}MB (prevents timeout)", None
+                return False, f"Video too large: {size_mb}MB\n⚠️ Limit: {Config.MAX_FILE_SIZE_MB}MB", None
             
             return True, None, info
             
     except Exception as e:
-        return False, f"❌ Download failed\n🔄 Reason: Unable to fetch video info\n💡 Try again in 1 minute", None
+        logger.warning(f"YouTube Validation Error: {e}")
+        return False, f"❌ Link Error: {str(e)[:50]}...", None
 
 async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
     """
@@ -197,80 +209,53 @@ async def forward_to_log_channel(client: Client, message: Message, custom_name: 
         return None
 
 async def download_youtube_video(url: str, user_id: int, progress_hook=None) -> Optional[str]:
-    """Download YouTube video and return file path"""
+    """Download YouTube video with robust network handling (IPv4/Proxy/Cookies)"""
     temp_dir = tempfile.mkdtemp()
     
-    # Attempt 1: Without cookies
-    logger.info(f"[USER {user_id}] Attempting YouTube download (no cookies): {url}")
-    if progress_hook:
-        await progress_hook("📥 Downloading video... (attempt 1/2)")
-    
+    # 1. Base Options
     ydl_opts = {
         'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-        'format': 'best[filesize<500M]/best',
+        'format': 'best[filesize<500M]/best', # Prioritize size limit
         'quiet': False,
-        'no_warnings': False,
-        'socket_timeout': 30,
-        'retries': 3,
-        'fragment_retries': 3,
+        'retries': 10,
+        'fragment_retries': 10,
+        'force_ipv4': True,      # CRITICAL FIX
+        'geo_bypass': True,
+        'nocheckcertificate': True,
         'progress_hooks': [progress_hook] if progress_hook else [],
     }
     
+    # 2. Proxy Check (from Secrets)
+    proxy_url = os.environ.get("PROXY_URL") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        logger.info(f"[USER {user_id}] Using Proxy for download.")
+        ydl_opts['proxy'] = proxy_url
+
+    # 3. Cookie Handling (Optional but recommended)
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = "cookies.txt"
+
+    # 4. Attempt Download
     try:
+        logger.info(f"[USER {user_id}] Starting YT download (Proxy: {bool(proxy_url)}, IPv4: True)")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.info(f"[USER {user_id}] Starting yt-dlp extraction")
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
-            # Find the downloaded file
+            # Double check file existence
+            if os.path.exists(filename):
+                return filename
+            
+            # Fallback: Search dir for specific extensions if filename match fails
             for file in os.listdir(temp_dir):
                 if file.endswith(('.mp4', '.webm', '.mkv', '.avi', '.mov')):
-                    logger.info(
-                        f"[USER {user_id}] ✅ YouTube download success (no cookies): "
-                        f"title={info.get('title', 'Unknown')}, path={filename}"
-                    )
                     return os.path.join(temp_dir, file)
-            
+                    
             return None
-            
+
     except Exception as e:
-        error1 = str(e)
-        logger.warning(f"[USER {user_id}] ⚠️ Download failed without cookies: {error1}")
-    
-    # Attempt 2: With cookies.txt
-    cookies_path = Path("cookies.txt")
-    if cookies_path.exists():
-        logger.info(f"[USER {user_id}] Attempting YouTube download (with cookies): {url}")
-        if progress_hook:
-            await progress_hook("📥 Downloading video... (attempt 2/2, with cookies)")
-        
-        ydl_opts['cookiefile'] = str(cookies_path)
-        
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                logger.info(f"[USER {user_id}] Starting yt-dlp extraction (with cookies)")
-                info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
-                
-                # Find the downloaded file
-                for file in os.listdir(temp_dir):
-                    if file.endswith(('.mp4', '.webm', '.mkv', '.avi', '.mov')):
-                        logger.info(
-                            f"[USER {user_id}] ✅ YouTube download success (with cookies): "
-                            f"title={info.get('title', 'Unknown')}"
-                        )
-                        return os.path.join(temp_dir, file)
-                
-                return None
-            
-        except Exception as e:
-            error2 = str(e)
-            logger.error(f"[USER {user_id}] ❌ Download failed even with cookies: {error2}")
-    else:
-        logger.warning(f"[USER {user_id}] ⚠️ No cookies.txt found, skipping cookies attempt")
-    
-    logger.error(f"[USER {user_id}] ❌ YouTube download completely failed")
-    return None
+        logger.error(f"[USER {user_id}] Download Error: {e}")
+        return None
 
 async def send_progress_message(client: Client, message: Message, text: str) -> Message:
     """Send or edit progress message"""
