@@ -68,9 +68,9 @@ class Config:
     # Log Channel Indexing Configuration
     LOG_CHANNEL_ID = get_int_env("LOG_CHANNEL_ID", 0)
     # DEBUG: Print LOG ID or ERROR
-    import sys
-    print(f"DEBUG: LOG_CHANNEL_ID from env = {LOG_CHANNEL_ID}", file=sys.stderr)
-    print(f"DEBUG: Raw env var = {os.getenv('LOG_CHANNEL_ID', 'NOT FOUND')}", file=sys.stderr)
+   # import sys
+   # print(f"DEBUG: LOG_CHANNEL_ID from env = {LOG_CHANNEL_ID}", file=sys.stderr)
+   # print(f"DEBUG: Raw env var = {os.getenv('LOG_CHANNEL_ID', 'NOT FOUND')}", file=sys.stderr)
 
     MONGO_URL = get_env("MONGO_URL", "mongodb://localhost:27017")
     MONGO_DB_NAME = get_env("MONGO_DB_NAME", "streamvault")
