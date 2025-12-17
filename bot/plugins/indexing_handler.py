@@ -18,6 +18,7 @@ import re
 import logging
 import tempfile
 import time
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -25,7 +26,7 @@ from urllib.parse import urlparse
 
 import yt_dlp
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram.errors import FloodWait, MessageIdInvalid
 
 from config import Config
@@ -49,10 +50,71 @@ YOUTUBE_PATTERNS = [
     r'(?:https?://)?(?:www\.)?youtube\.com/shorts/[\w-]+'
 ]
 
-# State management for file uploads
-upload_states = {}
+# --- 1. VISUAL FORMATTING & PROGRESS HELPERS ---
 
-class UploadState:
+def humanbytes(size):
+    """Convert bytes to human readable string (MB, GB)"""
+    if not size: return "0 B"
+    power = 2**10
+    n = 0
+    power_labels = {0: '', 1: 'Ki', 2: 'Mi', 3: 'Gi', 4: 'Ti'}
+    while size > power:
+        size /= power
+        n += 1
+    return f"{size:.2f} {power_labels[n]}B"
+
+def time_formatter(milliseconds: int) -> str:
+    """Format milliseconds to MM:SS"""
+    seconds, milliseconds = divmod(int(milliseconds), 1000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours: return f"{hours}h {minutes}m {seconds}s"
+    return f"{minutes}m {seconds}s"
+
+async def show_progress(current, total, message, start_time, stage="Task"):
+    """
+    Cool 'Hackery' Style Progress Bar with Refresh Button
+    """
+    now = time.time()
+    # Update only every 3 seconds to avoid FloodWait
+    if hasattr(show_progress, "last_update"):
+        if now - show_progress.last_update < 3 and current != total:
+            return
+    show_progress.last_update = now
+
+    percent = current * 100 / total
+    elapsed = now - start_time
+    speed = current / elapsed if elapsed > 0 else 0
+    eta = (total - current) / speed if speed > 0 else 0
+    
+    # Visual Bar
+    bar_length = 10
+    filled = int(percent / 100 * bar_length)
+    bar = "★" * filled + "☆" * (bar_length - filled)
+    
+    stats = (
+        f"🚧 **{stage} in Progress...**\n\n"
+        f"**Task By:** {message.chat.first_name}\n"
+        f"[{bar}] {percent:.1f}%\n"
+        f"**Processed:** {humanbytes(current)} of {humanbytes(total)}\n"
+        f"**Speed:** {humanbytes(speed)}/s\n"
+        f"**ETA:** {time_formatter(eta * 1000)}\n\n"
+        f"**Status:** 🔼 Running..."
+    )
+    
+    # Button to refresh
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("♻️ Refresh Stats", callback_data="status_refresh")]
+    ])
+    
+    try:
+        await message.edit_text(stats, reply_markup=buttons)
+    except:
+        pass
+
+# --- 2. STATE MANAGEMENT ---
+
+class FileState:
     """
     Temporary state tracker for multi-step file upload process.
     
@@ -68,11 +130,24 @@ class UploadState:
         custom_name (str): User-provided custom name (set later)
         created_at (datetime): State creation timestamp
     """
-    def __init__(self, message: Message, file_info: Dict[str, Any]):
+    def __init__(self, message, file_info):
+        self.type = "file"
         self.message = message
         self.file_info = file_info
         self.custom_name = None
-        self.created_at = datetime.utcnow()
+
+class YouTubeState:
+    def __init__(self, message, info_dict, url):
+        self.type = "youtube"
+        self.message = message
+        self.info = info_dict # Full metadata from YT
+        self.url = url
+        self.quality = 720 # Default
+        self.custom_name = None
+        self.last_msg = None # Status message to update
+
+# Unified State Dictionary (Replaces upload_states)
+user_states = {}
 
 def is_youtube_url(text: str) -> bool:
     """
@@ -435,6 +510,9 @@ async def handle_file_upload(client: Client, message: Message):
         # Create upload state and store for this user
         upload_states[message.from_user.id] = UploadState(message, file_info)
         logger.debug(f"Upload state created for user {message.from_user.id}")
+        
+        # Cancel BUTTON 
+        cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel Upload", callback_data="state_cancel")]])
 
         # Show confirmation and ask for custom name
         await message.reply_text(
@@ -446,7 +524,8 @@ async def handle_file_upload(client: Client, message: Message):
             f"📝 **Please provide a Name for this file:**\n"
             f"(e.g., \"Matrix.mp4\")\n\n"
             f"⏭️ **Or type `/skip` to use default name.**",
-            quote=True
+            quote=True,
+        reply_markup=cancel_btn
         )
     except Exception as e:
         logger.error(f"Error in file upload handler: {str(e)}", exc_info=True)
@@ -460,311 +539,314 @@ async def handle_file_upload(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.text)
 async def handle_text_messages(client: Client, message: Message):
-    """Handle text messages (YouTube URLs and custom names)"""
-    
-    # 1. IGNORE COMMANDS: If text starts with '/', let it pass to specific command handlers
-    # (Except '/skip' which is part of our renaming logic)
     text_clean = message.text.strip()
+    
+    # Allow passing commands if not involved in a flow
     if text_clean.startswith("/") and text_clean.lower() != "/skip":
         message.continue_propagation()
-        # This raises an internal Pyrogram exception to jump to the next handler
-        # It must NOT be inside a general try/except block.
 
     try:
         user_id = message.from_user.id
         
-        # Check if this is a custom name (or skip command) for a file upload
-        if user_id in upload_states:
-            state = upload_states[user_id]
+        # Check ACTIVE STATES (Naming Phase)
+        if user_id in user_states:
+            state = user_states[user_id]
             
-            # 1. Handle Skip - Default to original filename or generated unique name
+            # --- NAMING LOGIC ---
             if text_clean.lower() == "/skip":
-                original_name = state.file_info.get("file_name")
-                if original_name and original_name != "None":
-                    custom_name = original_name
+                # For File
+                if state.type == "file":
+                    custom_name = state.file_info["file_name"] or f"File_{int(time.time())}"
+                # For YT
                 else:
-                    custom_name = f"StreamVault_Upload_{int(time.time())}"
-                await message.reply_text(f"⏭️ Skipping rename. Using name: `{custom_name}`", quote=True)
-                
-            # 2. Handle Actual Custom Name
+                    custom_name = state.info.get("title", f"Video_{int(time.time())}")
             else:
                 custom_name = text_clean
-                if len(custom_name) > 200:
-                     await message.reply_text("❌ Name too long. Keep it under 200 characters.", quote=True)
-                     return
 
-            # Process the file upload with the finalized name
-            await process_file_upload(client, state, custom_name)
+            # Clean filename
+            state.custom_name = custom_name.replace("/", "_").replace("\\", "_")
             
-            # Clean up upload state
-            del upload_states[user_id]
+            # ROUTE TO CORRECT PROCESSOR
+            if state.type == "file":
+                await process_file_final(client, state)
+            elif state.type == "youtube":
+                await process_youtube_final(client, state)
+            
+            # Cleanup
+            del user_states[user_id]
             return
-        
-        # Check if this is a YouTube URL
+            
+        # Standard Youtube Check (Start)
         if is_youtube_url(message.text):
             await handle_youtube_download(client, message)
             return
             
-        # Unknown text message
-        await message.reply_text(
-            "❓ Send me a **file** or **YouTube link** to get started!\n"
-            "Use /help for more information.",
-            quote=True
-        )
+        await message.reply_text("❓ Send a File or Link to start.")
 
     except Exception as e:
-        logger.error(f"Error in text message handler: {e}", exc_info=True)
+        logger.error(f"Handler Error: {e}")
 
-
-async def process_file_upload(client: Client, state: UploadState, custom_name: str):
-    """Process file upload with custom name"""
-    try:
-        # Send progress message
-        progress_msg = await state.message.reply_text(
-            "⏳ **Processing...** Please wait\n"
-            f"📝 Applying Name: {custom_name}\n"
-            "📤 Copying to archive...",
-            quote=True
-        )
-        
-        # Forward to log channel with the new Custom Name
-        forwarded_msg_id = await forward_to_log_channel(client, state.message, custom_name)
-        if not forwarded_msg_id:
-            await progress_msg.edit_text(
-                "❌ **Upload failed**\n🔄 Reason: Unable to forward to archive\n💡 Try again or contact support"
-            )
-            return
-        
-        # Prepare file data for database
-        file_data = {
-            "message_id": forwarded_msg_id,
-            "file_unique_id": state.file_info["file_unique_id"],
-            "file_id": state.file_info["file_id"],
-            "custom_name": custom_name,
-            "file_size": state.file_info["file_size"],
-            "file_type": state.file_info["file_type"],
-            "source": state.file_info["source"],
-            "uploaded_by": state.message.from_user.id,
-            "stream_link": f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
-        }
-        
-        # Save to database
-        result_id = await db.save_file(file_data)
-        if not result_id:
-            await progress_msg.edit_text(
-                "❌ **Database error**\nFile forwarded but indexing failed\n💡 Contact support"
-            )
-            return
-        
-        # Send success message
-        await progress_msg.edit_text(
-            "✅ **File indexed successfully!**\n\n"
-            f"📊 **Details:**\n"
-            f"• Name: {custom_name}\n"
-            f"• Size: {state.file_info['file_size'] // 1024 // 1024} MB\n"
-            f"• Message ID: {forwarded_msg_id}\n\n"
-            f"🔗 **[Stream Ready ✨]({file_data['stream_link']})**"
-        )
-        
-    except Exception as e:
-        logger.error(f"File upload processing failed: {e}")
-        await state.message.reply_text(
-            "❌ **Processing failed**\n🔄 Please try again later\n💡 If problem persists, contact support",
-            quote=True
-        )
 
 async def handle_youtube_download(client: Client, message: Message):
-    """Handle YouTube video downloads with enhanced progress tracking and cookies fallback"""
+    """
+    Step 1: Fetch Video Info
+    Step 2: Show Resolution Keyboard (Menu)
+    """
     url = message.text.strip()
     user_id = message.from_user.id
+    status_msg = await message.reply_text("🔎 **Analyzing Link...**\nChecking available resolutions...", quote=True)
     
+    # 1. Fetch Metadata
+    # We validate here using your robust validation function
+    is_valid, error, info = await validate_youtube_video(url)
+    if not is_valid:
+        await status_msg.edit_text(error)
+        return
+
+    # 2. Interactive Menu (Quality Buttons)
+    buttons = [
+        [
+                InlineKeyboardButton("🌟 1080p (Best)", callback_data="yt_1080"),
+            InlineKeyboardButton("📺 720p (HD)", callback_data="yt_720")
+        ],
+        [
+            InlineKeyboardButton("📱 480p (SD)", callback_data="yt_480"),
+            InlineKeyboardButton("📉 360p (Saver)", callback_data="yt_360")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="yt_cancel")]
+    ]
+    
+    # 3. Store Info (So we can download it AFTER renaming)
+    user_states[user_id] = YouTubeState(message, info, url)
+    user_states[user_id].last_msg = status_msg
+    
+    title = info.get('title', 'Unknown Video')
+    duration_str = time_formatter(info.get('duration', 0) * 1000)
+    
+    await status_msg.edit_text(
+        f"🎬 **Found:** {title}\n"
+        f"⏱️ **Duration:** {duration_str}\n\n"
+        f"👇 **Select Quality to Download:**",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    
+async def process_youtube_final(client: Client, state: YouTubeState):
+    """Actual Download -> Upload Loop with Progress UI"""
+    msg = state.last_msg
     try:
-        logger.info(f"[USER {user_id}] Starting YouTube download workflow")
-        
-        # Send initial message
-        progress_msg = await message.reply_text(
-            "✅ **Link received!**\n⏳ Processing... this may take a moment",
-            quote=True
-        )
-        
-        # Validate video
-        is_valid, error_msg, video_info = await validate_youtube_video(url)
-        if not is_valid:
-            logger.warning(f"[USER {user_id}] Video validation failed: {error_msg}")
-            await progress_msg.edit_text(error_msg)
-            return
-        
-        # Progress callback to update status message
-        async def update_progress(msg: str):
+        await msg.edit_text(f"⏳ **Starting Download...**\nQuality: {state.quality}p")
+    except:
+        msg = await state.message.reply_text("⏳ **Starting...**")
+
+    # 1. DOWNLOAD WRAPPER (Visual Progress)
+    start_time = time.time()
+    
+    async def dl_progress(d):
+        if d['status'] == 'downloading':
             try:
-                await progress_msg.edit_text(f"⏳ {msg}")
-            except Exception as e:
-                logger.debug(f"Could not update progress: {e}")
+                # Use global helper for "Hackery" style bar
+                current = d.get('downloaded_bytes', 0)
+                total = d.get('total_bytes') or d.get('total_bytes_estimate', 1)
+                await show_progress(current, total, msg, start_time, stage=f"Downloading ({state.quality}p)")
+            except: pass
+
+    # Use selected resolution + User's Proxy/Cookie settings
+    file_path = await download_yt_res(state.url, state.quality, dl_progress)
+    
+    if not file_path:
+        await msg.edit_text("❌ **Download Failed.**\nSize limit exceeded or Geo-restriction.")
+        return
+
+    # 2. UPLOAD WRAPPER (Visual Progress)
+    f_size = os.path.getsize(file_path)
+    file_name = f"{state.custom_name}.mp4" 
+    
+    # Styled Caption for Log Channel (Your requested style)
+    log_caption = (
+        f"🎬 **{state.custom_name}**\n\n"
+        f"👤 **Task By:** {state.message.from_user.mention}\n"
+        f"💿 **Quality:** {state.quality}p\n"
+        f"📦 **Size:** {humanbytes(f_size)}\n"
+        f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"#StreamVault"
+    )
+
+    try:
+        start_up = time.time()
         
-        # Download progress callback
-        download_started = False
-        
-        async def download_progress_hook(d):
-            nonlocal download_started
-            if d['status'] == 'downloading':
-                if not download_started:
-                    await update_progress(
-                        f"📥 **Downloading video...**\n"
-                        f"🎬 **{video_info.get('title', 'Video')}**\n\n"
-                        f"[{'█' * 4}{'░' * 6}] 0%\nETA: calculating..."
-                    )
-                    download_started = True
-                
-                downloaded = d.get('downloaded_bytes', 0)
-                total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 1)
-                percent = min(100, (downloaded / total) * 100)
-                
-                bar_length = 10
-                filled = int(bar_length * percent / 100)
-                bar = '█' * filled + '░' * (bar_length - filled)
-                
-                speed = d.get('speed', 0) or 0
-                if speed:
-                    speed_str = f"{speed // 1024 // 1024} MB/s"
-                else:
-                    speed_str = "calculating..."
-                
-                eta = d.get('eta', 0)
-                if eta:
-                    eta_str = f"{eta // 60}m {eta % 60}s"
-                else:
-                    eta_str = "calculating..."
-                
-                await update_progress(
-                    f"📥 **Downloading video...**\n"
-                    f"🎬 **{video_info.get('title', 'Video')}**\n\n"
-                    f"[{bar}] {percent:.1f}%\n"
-                    f"⚡ Speed: {speed_str}\n"
-                    f"⏰ ETA: {eta_str}"
-                )
-            
-            elif d['status'] == 'finished':
-                await update_progress(
-                    "✅ **Download complete!**\n"
-                    "📤 **Uploading to archive...**"
-                )
-        
-        # Download the video with user_id and enhanced logging
-        logger.info(f"[USER {user_id}] Calling download_youtube_video()")
-        file_path = await download_youtube_video(url, user_id, download_progress_hook)
-        
-        if not file_path:
-            logger.error(f"[USER {user_id}] Download failed after both attempts")
-            await progress_msg.edit_text(
-                "❌ **Download failed**\n\n"
-                "🔄 **Tried both methods:**\n"
-                "• Attempt 1: Standard download\n"
-                "• Attempt 2: With cookies (if available)\n\n"
-                "💡 **Possible solutions:**\n"
-                "• Video may be age-restricted\n"
-                "• Video may not be available in your region\n"
-                "• Try another YouTube video"
+        async def up_progress(current, total):
+            await show_progress(current, total, msg, start_up, stage="Uploading to Cloud")
+
+        # UPLOAD to Log Channel
+        with open(file_path, 'rb') as f:
+            sent = await client.send_document(
+                chat_id=int(Config.LOG_CHANNEL_ID),
+                document=f,
+                file_name=file_name,
+                caption=log_caption,
+                progress=up_progress
             )
-            return
         
-        file_name = os.path.basename(file_path)
-        file_size = os.path.getsize(file_path)
-        logger.info(
-            f"[USER {user_id}] Download complete: "
-            f"title={video_info.get('title', file_name)}, size={file_size}, path={file_path}"
+        # 3. DATABASE & LINK GENERATION
+        link = f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{sent.id}"
+        file_data = {
+            "message_id": sent.id,
+            "custom_name": state.custom_name,
+            "file_size": f_size,
+            "file_type": "video",
+            "quality": f"{state.quality}p",
+            "stream_link": link
+        }
+        await db.save_file(file_data)
+
+        # 4. SUCCESS MESSAGE (Hidden Link)
+        await msg.edit_text(
+            f"✅ **Success!**\n\n"
+            f"🎬 Name: **{state.custom_name}**\n"
+            f"💿 Quality: `{state.quality}p`\n"
+            f"💾 Size: `{humanbytes(f_size)}`\n\n"
+            f"🔗 **[Click Here to Stream]({link})**",
+            disable_web_page_preview=True
         )
-        
-        # Upload to Telegram
-        try:
-            logger.info(f"[USER {user_id}] Starting upload to Telegram")
-            
-            # Forward the file to log channel
-            forwarded_msg_id = await forward_file_to_log_channel(client, file_path, file_name, video_info)
-            if not forwarded_msg_id:
-                logger.error(f"[USER {user_id}] Upload to Telegram failed")
-                await progress_msg.edit_text(
-                    "❌ **Upload to archive failed**\n"
-                    "🔄 Connection timeout\n"
-                    "💡 Try again in 1 minute"
-                )
-                return
-            
-            logger.info(f"[USER {user_id}] Upload complete: message_id={forwarded_msg_id}")
-            
-            # Prepare file data for database
-            duration = video_info.get('duration', 0)
-            
-            file_data = {
-                "message_id": forwarded_msg_id,
-                "file_unique_id": video_info.get('id', 'youtube'),
-                "file_id": forwarded_msg_id,  # Use message ID as file ID for YouTube
-                "custom_name": video_info.get('title', file_name),
-                "file_size": file_size,
-                "file_type": "video",
-                "source": "youtube_link",
-                "youtube_url": url,
-                "duration": duration,
-                "uploaded_by": user_id,
-                "stream_link": f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
-            }
-            
-            # Save to database
-            result_id = await db.save_file(file_data)
-            if not result_id:
-                logger.error(f"[USER {user_id}] Failed to save YouTube to MongoDB")
-                await progress_msg.edit_text(
-                    "⚠️ **Partial success**\n"
-                    "Video uploaded to archive but indexing failed\n"
-                    "💡 Try again or contact support"
-                )
-                return
-            
-            logger.info(
-                f"[USER {user_id}] YouTube indexed in MongoDB: "
-                f"title={video_info.get('title', file_name)}, size={file_size}"
-            )
-            
-            # Format duration for display
-            if duration:
-                hours = duration // 3600
-                minutes = (duration % 3600) // 60
-                duration_str = f"{hours}h {minutes}m" if hours else f"{minutes}m"
-            else:
-                duration_str = "Unknown"
-            
-            # Send success message
-            stream_link = f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
-            await progress_msg.edit_text(
-                f"✅ **Upload complete!**\n\n"
-                f"📊 **Details:**\n"
-                f"• Title: {video_info.get('title', file_name)[:50]}\n"
-                f"• Size: {file_size // 1024 // 1024} MB\n"
-                f"• Duration: {duration_str}\n"
-                f"• Message ID: {forwarded_msg_id}\n\n"
-                f"🔗 **[Stream Ready ✨]({file_data['stream_link']})**"
-                f"💡 Use /catalog to see all your files"
-            )
-            
-        finally:
-            # Clean up temp file
-            try:
-                os.remove(file_path)
-                os.rmdir(os.path.dirname(file_path))
-                logger.info(f"[USER {user_id}] Deleted local file: {file_path}")
-            except Exception as e:
-                logger.warning(f"[USER {user_id}] Could not delete file: {e}")
-                
+
     except Exception as e:
-        logger.error(
-            f"[USER {user_id}] Unexpected error in YouTube handler: {str(e)}",
-            exc_info=True
+        logger.error(f"Upload flow failed: {e}")
+        await msg.edit_text(f"❌ Error during upload: {e}")
+    finally:
+        # Cleanup temp file
+        if os.path.exists(file_path): os.remove(file_path)
+        try: os.rmdir(os.path.dirname(file_path)) 
+        except: pass
+    
+async def download_yt_res(url, height, hook):
+    """Download with specific resolution, IPv4, Proxy AND Cookies"""
+    temp_dir = tempfile.mkdtemp()
+    
+    # Format String: try for selected height, fallback to 'best'
+    # This prevents the "Video Format Not Found" error
+    fmt_str = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+
+    ydl_opts = {
+        'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+        'format': fmt_str,
+        'quiet': False,
+        'force_ipv4': True,   # Fixes DNS Errno -5
+        'geo_bypass': True,
+        'progress_hooks': [hook] if hook else [],
+    }
+    
+    # 1. Inject Proxy (Secrets)
+    proxy = os.environ.get("PROXY_URL") or os.environ.get("HTTP_PROXY")
+    if proxy: 
+        ydl_opts['proxy'] = proxy
+
+    # 2. Inject Cookies (Your requirement)
+    if os.path.exists("cookies.txt"):
+        ydl_opts['cookiefile'] = "cookies.txt"
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            path = ydl.prepare_filename(info)
+            if os.path.exists(path): return path
+            return None
+    except Exception as e:
+        logger.error(f"DL Error: {e}")
+        return None
+        
+async def process_file_final(client: Client, state: FileState):
+    """
+    Handle direct file indexing.
+    Replaces the old 'process_file_upload'.
+    """
+    msg = await state.message.reply_text("⏳ **Indexing File...**", quote=True)
+    
+    # 1. Prepare Styled Caption (The "New Look")
+    size_str = humanbytes(state.file_info["file_size"])
+    log_caption = (
+        f"🎬 **{state.custom_name}**\n\n"
+        f"👤 **User:** {state.message.from_user.mention}\n"
+        f"💾 **Size:** {size_str}\n"
+        f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n"
+        f"#StreamVault"
+    )
+
+    try:
+        # 2. Forward to Log (Using copy + new caption)
+        # This acts exactly like your old forward function but natively supports renaming
+        log_msg = await state.message.copy(
+            chat_id=LOG_CHANNEL,
+            caption=log_caption
         )
-        await message.reply_text(
-            f"❌ **Unexpected error**\n"
-            f"🔄 Error: {str(e)[:100]}\n"
-            f"💡 Check logs or try again",
-            quote=True
+        
+        # 3. Save to Database
+        link = f"{Config.URL}/stream/{LOG_CHANNEL}/{log_msg.id}"
+        file_data = {
+            "message_id": log_msg.id,
+            "custom_name": state.custom_name,
+            "file_size": state.file_info["file_size"],
+            "file_type": state.file_info["file_type"],
+            "stream_link": link
+        }
+        await db.save_file(file_data)
+        
+        # 4. Success Message (Hidden Link Style)
+        await msg.edit_text(
+            f"✅ **Indexed Successfully!**\n"
+            f"🎬 Name: {state.custom_name}\n\n"
+            f"🔗 **[Click Here to Stream]({link})**",
+            disable_web_page_preview=True
         )
+
+    except (ValueError, KeyError):
+        # Specific Catch for the "Peer Invalid" / Private Channel Cache issue
+        await msg.edit_text(f"❌ **Server Cache Error**\nPlease send `/start` inside your Log Channel to fix the permission link.")
+    except Exception as e:
+        logger.error(f"File process error: {e}")
+        await msg.edit_text(f"❌ System Error: {e}")
+        
+# Callback Queries -----
+
+@Client.on_callback_query(filters.regex(r"^yt_"))
+async def handle_yt_buttons(client: Client, callback: CallbackQuery):
+    """Handles Quality Selection Clicks"""
+    user_id = callback.from_user.id
+    data = callback.data
+    
+    if data == "yt_cancel":
+        if user_id in user_states: del user_states[user_id]
+        await callback.message.edit_text("❌ **Task Cancelled.**")
+        return
+
+    # Check State validity
+    if user_id not in user_states or user_states[user_id].type != "youtube":
+        await callback.answer("⚠️ Session expired.", show_alert=True)
+        return
+
+    state = user_states[user_id]
+    target_res = int(data.split("_")[1]) # Extracts 1080 from "yt_1080"
+    state.quality = target_res
+    
+    # NEW: Add Cancel Button to renaming phase
+    cancel_btn = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel Task", callback_data="state_cancel")]])
+    
+    await callback.message.edit_text(
+        f"✅ Selected: **{target_res}p**\n\n"
+        f"📝 **Renaming:**\n"
+        f"Send a name for the video, or type `/skip`.\n\n"
+        f"Video: `{state.info.get('title')}`",
+        reply_markup=cancel_btn
+    )
+    
+@Client.on_callback_query(filters.regex("^state_cancel$"))
+async def cancel_state_handler(client: Client, callback: CallbackQuery):
+    """Generic Cancel button handler for any State (File or YT)"""
+    user_id = callback.from_user.id
+    if user_id in user_states:
+        del user_states[user_id]
+        await callback.message.edit_text("❌ **Process Cancelled by User.**")
+    else:
+        await callback.answer("Nothing to cancel.", show_alert=True)
 
 async def forward_file_to_log_channel(client: Client, file_path: str, file_name: str, video_info: Dict) -> Optional[int]:
     """Forward downloaded file to log channel"""
@@ -862,81 +944,57 @@ async def handle_stream_command(client: Client, message: Message):
 
 @Client.on_message(filters.private & filters.command("delete"))
 async def handle_delete(client: Client, message: Message):
-    """Handle /delete command"""
+    """Delete command with Button Confirmation"""
     try:
-        # Parse command arguments
-        args = message.text.split()
-        if len(args) < 2:
-            await message.reply_text(
-                "❌ **Invalid command**\n\n"
-                "Usage: `/delete [message_id]`\n\n"
-                "Get message_id from /catalog",
-                quote=True
-            )
+        # Check if ID provided
+        if len(message.command) < 2:
+            await message.reply_text("ℹ️ Usage: `/delete [Message_ID]`", quote=True)
             return
-        
-        try:
-            message_id = int(args[1])
-        except ValueError:
-            await message.reply_text(
-                "❌ **Invalid message ID**\n"
-                "Message ID must be a number",
-                quote=True
-            )
-            return
-        
-        # Get file info before deletion
-        file_info = await db.get_file(message_id)
-        if not file_info:
-            await message.reply_text(
-                f"❌ **File not found**\nMessage ID: {message_id}",
-                quote=True
-            )
-            return
-        
-        # Show confirmation prompt
-        file_name = file_info.get('custom_name', 'Unknown')
-        await message.reply_text(
-            f"⚠️ **Delete \"{file_name}\"?**\n"
-            f"This action cannot be undone.\n\n"
-            f"Reply: `/confirm_delete_{message_id}`",
-            quote=True
-        )
-        
-    except Exception as e:
-        logger.error(f"Delete command failed: {e}")
-        await message.reply_text(
-            "❌ **Delete command error**\n🔄 Please try again",
-            quote=True
-        )
 
-@Client.on_message(filters.private & filters.regex(r"^/confirm_delete_(\d+)"))
-async def handle_confirm_delete(client: Client, message: Message):
-    """Handle /confirm_delete_[id] command using Regex"""
-    try:
-        # Extract message_id directly from the command regex
-        message_id = int(message.matches[0].group(1))
+        mid = message.command[1]
         
-        # Perform deletion
-        success = await db.delete_file(message_id)
+        # 1. Fetch file info for confirmation (Make it look good)
+        file_info = await db.get_file(int(mid))
+        if not file_info:
+            await message.reply_text("❌ File not found in Database.", quote=True)
+            return
+
+        file_name = file_info.get('custom_name', 'Unknown')
         
-        if success:
-            await message.reply_text(
-                f"✅ **File deleted successfully**\nMessage ID: {message_id}",
-                quote=True
-            )
-        else:
-            await message.reply_text(
-                f"❌ **Delete failed**\nFile ID {message_id} not found in database.",
-                quote=True
-            )
-            
-    except Exception as e:
-        logger.error(f"Confirm delete failed: {e}")
+        # 2. Show Buttons
+        buttons = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🗑️ Yes, Delete", callback_data=f"del_conf_{mid}"),
+                InlineKeyboardButton("❌ Cancel", callback_data="del_cancel")
+            ]
+        ])
+        
         await message.reply_text(
-            "❌ **Delete confirmation error**\n🔄 Please try again",
+            f"⚠️ **Confirm Deletion?**\n\n"
+            f"📂 File: **{file_name}**\n"
+            f"🆔 ID: `{mid}`\n\n"
+            f"This will remove it from the Index.",
+            reply_markup=buttons,
             quote=True
         )
+    except ValueError:
+        await message.reply_text("❌ ID must be a number.", quote=True)
+
+# Callback for the Delete Buttons
+@Client.on_callback_query(filters.regex(r"^del_"))
+async def delete_callback_handler(client: Client, callback: CallbackQuery):
+    data = callback.data
+    
+    if data == "del_cancel":
+        await callback.message.edit_text("❌ **Deletion Cancelled.**")
+        return
+        
+    if data.startswith("del_conf_"):
+        mid = int(data.split("_")[2])
+        if await db.delete_file(mid):
+            await callback.message.edit_text(f"✅ **Deleted Successfully!**\nID: `{mid}` has been removed.")
+        else:
+            await callback.message.edit_text("❌ Error: Could not delete (maybe already gone).")
 
 @Client.on_message(filters.private & filters.command("search"))
 async def handle_search(client: Client, message: Message):
