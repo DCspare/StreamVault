@@ -17,7 +17,9 @@ import asyncio
 import re
 import logging
 import tempfile
+import time
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse
 
@@ -165,31 +167,81 @@ async def forward_to_log_channel(client: Client, message: Message) -> Optional[i
         logger.error(f"Failed to forward message {message.id}: {e}")
         return None
 
-async def download_youtube_video(url: str, progress_hook=None) -> Optional[str]:
+async def download_youtube_video(url: str, user_id: int, progress_hook=None) -> Optional[str]:
     """Download YouTube video and return file path"""
     temp_dir = tempfile.mkdtemp()
     
+    # Attempt 1: Without cookies
+    logger.info(f"[USER {user_id}] Attempting YouTube download (no cookies): {url}")
+    if progress_hook:
+        await progress_hook("📥 Downloading video... (attempt 1/2)")
+    
     ydl_opts = {
         'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-        'format': 'best[ext=mp4]/best[ext=webm]/best',
+        'format': 'best[filesize<500M]/best',
+        'quiet': False,
+        'no_warnings': False,
+        'socket_timeout': 30,
+        'retries': 3,
+        'fragment_retries': 3,
         'progress_hooks': [progress_hook] if progress_hook else [],
     }
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"[USER {user_id}] Starting yt-dlp extraction")
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
             # Find the downloaded file
             for file in os.listdir(temp_dir):
                 if file.endswith(('.mp4', '.webm', '.mkv', '.avi', '.mov')):
+                    logger.info(
+                        f"[USER {user_id}] ✅ YouTube download success (no cookies): "
+                        f"title={info.get('title', 'Unknown')}, path={filename}"
+                    )
                     return os.path.join(temp_dir, file)
             
             return None
             
     except Exception as e:
-        logger.error(f"YouTube download failed: {e}")
-        return None
+        error1 = str(e)
+        logger.warning(f"[USER {user_id}] ⚠️ Download failed without cookies: {error1}")
+    
+    # Attempt 2: With cookies.txt
+    cookies_path = Path("cookies.txt")
+    if cookies_path.exists():
+        logger.info(f"[USER {user_id}] Attempting YouTube download (with cookies): {url}")
+        if progress_hook:
+            await progress_hook("📥 Downloading video... (attempt 2/2, with cookies)")
+        
+        ydl_opts['cookiefile'] = str(cookies_path)
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                logger.info(f"[USER {user_id}] Starting yt-dlp extraction (with cookies)")
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+                
+                # Find the downloaded file
+                for file in os.listdir(temp_dir):
+                    if file.endswith(('.mp4', '.webm', '.mkv', '.avi', '.mov')):
+                        logger.info(
+                            f"[USER {user_id}] ✅ YouTube download success (with cookies): "
+                            f"title={info.get('title', 'Unknown')}"
+                        )
+                        return os.path.join(temp_dir, file)
+                
+                return None
+            
+        except Exception as e:
+            error2 = str(e)
+            logger.error(f"[USER {user_id}] ❌ Download failed even with cookies: {error2}")
+    else:
+        logger.warning(f"[USER {user_id}] ⚠️ No cookies.txt found, skipping cookies attempt")
+    
+    logger.error(f"[USER {user_id}] ❌ YouTube download completely failed")
+    return None
 
 async def send_progress_message(client: Client, message: Message, text: str) -> Message:
     """Send or edit progress message"""
@@ -291,13 +343,13 @@ Still stuck? → Contact support""".format(
     except Exception as e:
         logger.error(f"Error in help command: {e}")
 
-@Client.on_message(filters.private & filters.document)
+@Client.on_message(filters.private & (filters.document | filters.video | filters.audio))
 async def handle_file_upload(client: Client, message: Message):
     """
-    Handle direct file uploads from users.
+    Handle direct file uploads from users (documents, videos, and audio).
     
     Workflow:
-    1. User sends a file to the bot
+    1. User sends a file to the bot (document, video, or audio)
     2. Bot validates file size (max 500MB by default)
     3. Bot asks user for a custom name
     4. Bot stores upload state temporarily awaiting custom name
@@ -307,50 +359,76 @@ async def handle_file_upload(client: Client, message: Message):
         message (Message): User's file upload message
         
     Flow:
-        - Extract file metadata (size, name, ID)
+        - Extract file metadata (size, name, ID) from any supported file type
         - Check against MAX_FILE_SIZE limit
         - Store in upload_states dictionary for tracking
         - Send prompt asking for custom name
     """
     try:
-        file = message.document
+        # Extract file from whichever type was sent (document, video, or audio)
+        file = message.document or message.video or message.audio
         if not file:
+            await message.reply_text("❌ No file found in message", quote=True)
             return
-        
-        logger.info(f"File upload received: file_id={file.file_id[:20]}..., size={file.file_size}, user={message.from_user.id}")
-        
+
+        # Log file reception
+        file_type = type(file).__name__.lower()
+        logger.info(
+            f"File upload received: type={file_type}, "
+            f"size={getattr(file, 'file_size', 'unknown')}, "
+            f"user={message.from_user.id}"
+        )
+
+        # Get file size
+        file_size = getattr(file, 'file_size', 0)
+        if not file_size:
+            await message.reply_text("❌ Could not determine file size", quote=True)
+            return
+
         # Validate file size against configured limit
-        is_valid, error_msg = await validate_file_size(file.file_size)
+        is_valid, error_msg = await validate_file_size(file_size)
         if not is_valid:
-            logger.warning(f"File rejected (too large): {file.file_size} bytes, user={message.from_user.id}")
+            size_mb = file_size // (1024 * 1024)
+            logger.warning(f"File rejected (too large): {size_mb}MB, user={message.from_user.id}")
             await message.reply_text(error_msg, quote=True)
             return
-        
+
+        # Get file name
+        file_name = getattr(file, "file_name", None) or f"file_{int(time.time())}"
+
         # Store file info temporarily while waiting for custom name
         file_info = {
             "file_id": file.file_id,
-            "file_unique_id": file.file_unique_id,
-            "file_size": file.file_size,
-            "file_name": getattr(file, "file_name", "Unknown"),
-            "mime_type": file.mime_type,
-            "source": "direct_upload"
+            "file_unique_id": getattr(file, "file_unique_id", ""),
+            "file_size": file_size,
+            "file_name": file_name,
+            "mime_type": getattr(file, "mime_type", ""),
+            "source": "direct_upload",
+            "file_type": file_type
         }
         
         # Create upload state and store for this user
         upload_states[message.from_user.id] = UploadState(message, file_info)
         logger.debug(f"Upload state created for user {message.from_user.id}")
-        
-        # Request custom name from user
+
+        # Show confirmation and ask for custom name
         await message.reply_text(
             f"✅ **File received!**\n\n"
             f"📄 **Details:**\n"
-            f"• Name: {file_info['file_name']}\n"
-            f"• Size: {file_info['file_size'] // 1024 // 1024} MB\n\n"
-            f"📝 **Send a custom name for this file** (e.g., \"Avengers_Endgame_720p\")",
+            f"• Name: {file_name}\n"
+            f"• Size: {file_size // (1024 * 1024)} MB\n"
+            f"• Type: {file_type.upper()}\n\n"
+            f"📝 **Send a custom name for this file** (e.g., \"My_Video_720p\")",
             quote=True
         )
     except Exception as e:
-        logger.error(f"Error in file upload handler: {e}", exc_info=True)
+        logger.error(f"Error in file upload handler: {str(e)}", exc_info=True)
+        await message.reply_text(
+            f"❌ **Error processing file**\n"
+            f"🔄 Reason: {str(e)[:100]}\n"
+            f"💡 Try again or contact support",
+            quote=True
+        )
 
 
 @Client.on_message(filters.private & filters.text)
@@ -414,7 +492,7 @@ async def process_file_upload(client: Client, state: UploadState, custom_name: s
             "file_id": state.file_info["file_id"],
             "custom_name": custom_name,
             "file_size": state.file_info["file_size"],
-            "file_type": "file",
+            "file_type": state.file_info["file_type"],
             "source": state.file_info["source"],
             "uploaded_by": state.message.from_user.id,
             "stream_link": f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
@@ -447,21 +525,32 @@ async def process_file_upload(client: Client, state: UploadState, custom_name: s
         )
 
 async def handle_youtube_download(client: Client, message: Message):
-    """Handle YouTube video downloads"""
+    """Handle YouTube video downloads with enhanced progress tracking and cookies fallback"""
     url = message.text.strip()
+    user_id = message.from_user.id
     
     try:
+        logger.info(f"[USER {user_id}] Starting YouTube download workflow")
+        
         # Send initial message
         progress_msg = await message.reply_text(
-            "✅ **Link received!**\n⏳ **Processing...** this may take a moment",
+            "✅ **Link received!**\n⏳ Processing... this may take a moment",
             quote=True
         )
         
         # Validate video
         is_valid, error_msg, video_info = await validate_youtube_video(url)
         if not is_valid:
+            logger.warning(f"[USER {user_id}] Video validation failed: {error_msg}")
             await progress_msg.edit_text(error_msg)
             return
+        
+        # Progress callback to update status message
+        async def update_progress(msg: str):
+            try:
+                await progress_msg.edit_text(f"⏳ {msg}")
+            except Exception as e:
+                logger.debug(f"Could not update progress: {e}")
         
         # Download progress callback
         download_started = False
@@ -470,8 +559,8 @@ async def handle_youtube_download(client: Client, message: Message):
             nonlocal download_started
             if d['status'] == 'downloading':
                 if not download_started:
-                    await progress_msg.edit_text(
-                        "📥 **Downloading video...**\n"
+                    await update_progress(
+                        f"📥 **Downloading video...**\n"
                         f"🎬 **{video_info.get('title', 'Video')}**\n\n"
                         f"[{'█' * 4}{'░' * 6}] 0%\nETA: calculating..."
                     )
@@ -497,7 +586,7 @@ async def handle_youtube_download(client: Client, message: Message):
                 else:
                     eta_str = "calculating..."
                 
-                await progress_msg.edit_text(
+                await update_progress(
                     f"📥 **Downloading video...**\n"
                     f"🎬 **{video_info.get('title', 'Video')}**\n\n"
                     f"[{bar}] {percent:.1f}%\n"
@@ -506,41 +595,55 @@ async def handle_youtube_download(client: Client, message: Message):
                 )
             
             elif d['status'] == 'finished':
-                await progress_msg.edit_text(
+                await update_progress(
                     "✅ **Download complete!**\n"
                     "📤 **Uploading to archive...**"
                 )
         
-        # Download the video
-        file_path = await download_youtube_video(url, download_progress_hook)
+        # Download the video with user_id and enhanced logging
+        logger.info(f"[USER {user_id}] Calling download_youtube_video()")
+        file_path = await download_youtube_video(url, user_id, download_progress_hook)
+        
         if not file_path:
+            logger.error(f"[USER {user_id}] Download failed after both attempts")
             await progress_msg.edit_text(
-                "❌ **Download failed**\n🔄 Connection timeout\n💡 Try again in 1 minute"
+                "❌ **Download failed**\n\n"
+                "🔄 **Tried both methods:**\n"
+                "• Attempt 1: Standard download\n"
+                "• Attempt 2: With cookies (if available)\n\n"
+                "💡 **Possible solutions:**\n"
+                "• Video may be age-restricted\n"
+                "• Video may not be available in your region\n"
+                "• Try another YouTube video"
             )
             return
         
-        # Upload to Telegram
         file_name = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        logger.info(
+            f"[USER {user_id}] Download complete: "
+            f"title={video_info.get('title', file_name)}, size={file_size}, path={file_path}"
+        )
         
+        # Upload to Telegram
         try:
-            # Send progress update
-            upload_progress_msg = await message.reply_text(
-                "📤 **Uploading to archive...**\n"
-                f"📁 **{file_name}**",
-                quote=False
-            )
+            logger.info(f"[USER {user_id}] Starting upload to Telegram")
             
             # Forward the file to log channel
             forwarded_msg_id = await forward_file_to_log_channel(client, file_path, file_name, video_info)
             if not forwarded_msg_id:
+                logger.error(f"[USER {user_id}] Upload to Telegram failed")
                 await progress_msg.edit_text(
-                    "❌ **Upload failed**\n🔄 Connection timeout\n💡 Try again in 1 minute"
+                    "❌ **Upload to archive failed**\n"
+                    "🔄 Connection timeout\n"
+                    "💡 Try again in 1 minute"
                 )
                 return
             
+            logger.info(f"[USER {user_id}] Upload complete: message_id={forwarded_msg_id}")
+            
             # Prepare file data for database
             duration = video_info.get('duration', 0)
-            file_size = os.path.getsize(file_path)
             
             file_data = {
                 "message_id": forwarded_msg_id,
@@ -552,17 +655,25 @@ async def handle_youtube_download(client: Client, message: Message):
                 "source": "youtube_link",
                 "youtube_url": url,
                 "duration": duration,
-                "uploaded_by": message.from_user.id,
+                "uploaded_by": user_id,
                 "stream_link": f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
             }
             
             # Save to database
             result_id = await db.save_file(file_data)
             if not result_id:
+                logger.error(f"[USER {user_id}] Failed to save YouTube to MongoDB")
                 await progress_msg.edit_text(
-                    "❌ **Database error**\nVideo uploaded but indexing failed\n💡 Contact support"
+                    "⚠️ **Partial success**\n"
+                    "Video uploaded to archive but indexing failed\n"
+                    "💡 Try again or contact support"
                 )
                 return
+            
+            logger.info(
+                f"[USER {user_id}] YouTube indexed in MongoDB: "
+                f"title={video_info.get('title', file_name)}, size={file_size}"
+            )
             
             # Format duration for display
             if duration:
@@ -573,14 +684,17 @@ async def handle_youtube_download(client: Client, message: Message):
                 duration_str = "Unknown"
             
             # Send success message
+            stream_link = f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{forwarded_msg_id}"
             await progress_msg.edit_text(
-                "✅ **Upload complete!**\n\n"
+                f"✅ **Upload complete!**\n\n"
                 f"📊 **Details:**\n"
-                f"• Name: {video_info.get('title', file_name)}\n"
+                f"• Title: {video_info.get('title', file_name)[:50]}\n"
                 f"• Size: {file_size // 1024 // 1024} MB\n"
                 f"• Duration: {duration_str}\n"
                 f"• Message ID: {forwarded_msg_id}\n\n"
-                f"🔗 **Stream Link:** {file_data['stream_link']}"
+                f"🔗 **Stream Link:**\n"
+                f"`{stream_link}`\n\n"
+                f"💡 Use `/catalog` to see all your files"
             )
             
         finally:
@@ -588,13 +702,19 @@ async def handle_youtube_download(client: Client, message: Message):
             try:
                 os.remove(file_path)
                 os.rmdir(os.path.dirname(file_path))
-            except:
-                pass
+                logger.info(f"[USER {user_id}] Deleted local file: {file_path}")
+            except Exception as e:
+                logger.warning(f"[USER {user_id}] Could not delete file: {e}")
                 
     except Exception as e:
-        logger.error(f"YouTube download failed: {e}")
+        logger.error(
+            f"[USER {user_id}] Unexpected error in YouTube handler: {str(e)}",
+            exc_info=True
+        )
         await message.reply_text(
-            "❌ **Download failed**\n🔄 Error occurred\n💡 Try again or contact support",
+            f"❌ **Unexpected error**\n"
+            f"🔄 Error: {str(e)[:100]}\n"
+            f"💡 Check logs or try again",
             quote=True
         )
 
