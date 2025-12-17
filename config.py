@@ -41,13 +41,13 @@ class Config:
             int: Parsed integer value or default
         """
         try:
-        value = os.getenv(key)
-        if value is None:
+            value = os.getenv(key)
+            if value is None:
+                return default
+            return int(value)  # Simple - handles negatives automatically
+        except (ValueError, TypeError):
+            print(f"⚠️ Invalid {key}: '{value}' - using default: {default}")
             return default
-        return int(value)  # Simple - handles negatives automatically
-    except (ValueError, TypeError):
-        print(f"⚠️ Invalid {key}: '{value}' - using default: {default}")
-        return default
 
     # Telegram Bot Configuration
     API_ID = get_int_env("API_ID", 0)
