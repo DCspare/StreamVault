@@ -26,7 +26,7 @@ jobs:
       
       - name: Add HuggingFace remote
         run: |
-          git remote add hf https://huggingface.co/spaces/DC-Hacks/StreamVault-V1
+          git remote add hf https://huggingface.co/spaces/DC-Hacks/StreamVault-1
           echo "✅ HF remote added"
       
       - name: Fetch from HF
@@ -44,7 +44,7 @@ jobs:
       - name: Update HF remote with auth
         run: |
           git remote remove hf
-          git remote add hf https://DC-Hacks:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/DC-Hacks/StreamVault-V1
+          git remote add hf https://DC-Hacks:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/DC-Hacks/StreamVault-1
           echo "✅ HF remote updated with auth"
       
       - name: Push to HuggingFace Spaces
