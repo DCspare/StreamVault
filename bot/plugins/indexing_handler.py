@@ -304,7 +304,7 @@ Here's what you can do:
 1️⃣ **Send any file** → I'll index it for streaming
 2️⃣ **Send a YouTube link** → I'll download and archive it
 3️⃣ **Request /catalog** → See all indexed files
-4️⃣ **Request /delete [ID]** → Remove a file from archive
+4️⃣ **Request `/delete [ID]`** → Remove a file from archive
 
 ⚠️ **Limits:**
 • Max file size: {max_size}MB
@@ -350,7 +350,7 @@ Send any file → I'll ask for a custom name → File gets indexed and stream li
 Send YouTube URL → I'll download and archive it → Stream link generated
 
 **📚 Catalog Management:**
-`/catalog` - View all indexed files with pagination
+/catalog - View all indexed files with pagination
 `/delete [message_id]` - Remove file from archive (soft delete)
 `/search [query]` - Search files by name using keywords
 
@@ -476,16 +476,24 @@ async def handle_file_upload(client: Client, message: Message):
 @Client.on_message(filters.private & filters.text)
 async def handle_text_messages(client: Client, message: Message):
     """Handle text messages (YouTube URLs and custom names)"""
+    
+    # 1. IGNORE COMMANDS: If text starts with '/', let it pass to specific command handlers
+    # (Except '/skip' which is part of our renaming logic)
+    text_clean = message.text.strip()
+    if text_clean.startswith("/") and text_clean.lower() != "/skip":
+        message.continue_propagation()
+        # This raises an internal Pyrogram exception to jump to the next handler
+        # It must NOT be inside a general try/except block.
+
     try:
         user_id = message.from_user.id
         
         # Check if this is a custom name (or skip command) for a file upload
         if user_id in upload_states:
             state = upload_states[user_id]
-            user_text = message.text.strip()
             
             # 1. Handle Skip - Default to original filename or generated unique name
-            if user_text.lower() == "/skip":
+            if text_clean.lower() == "/skip":
                 original_name = state.file_info.get("file_name")
                 if original_name and original_name != "None":
                     custom_name = original_name
@@ -495,13 +503,7 @@ async def handle_text_messages(client: Client, message: Message):
                 
             # 2. Handle Actual Custom Name
             else:
-                # Prevent other commands being interpreted as names
-                if user_text.startswith("/") and len(user_text) > 1:
-                     # It's likely another command (like /start during upload process)
-                    await message.reply_text("❌ If you want to use a command, please cancel upload or type /skip first.", quote=True)
-                    return
-                    
-                custom_name = user_text
+                custom_name = text_clean
                 if len(custom_name) > 200:
                      await message.reply_text("❌ Name too long. Keep it under 200 characters.", quote=True)
                      return
@@ -517,11 +519,6 @@ async def handle_text_messages(client: Client, message: Message):
         if is_youtube_url(message.text):
             await handle_youtube_download(client, message)
             return
-        
-        # Ignore other /commands so they can fall through to other handlers
-        if message.text.startswith("/"):
-            message.continue_propagation()
-            return
             
         # Unknown text message
         await message.reply_text(
@@ -529,6 +526,7 @@ async def handle_text_messages(client: Client, message: Message):
             "Use /help for more information.",
             quote=True
         )
+
     except Exception as e:
         logger.error(f"Error in text message handler: {e}", exc_info=True)
 
@@ -580,7 +578,7 @@ async def process_file_upload(client: Client, state: UploadState, custom_name: s
             f"• Name: {custom_name}\n"
             f"• Size: {state.file_info['file_size'] // 1024 // 1024} MB\n"
             f"• Message ID: {forwarded_msg_id}\n\n"
-            f"🔗 **Stream Link:**\n`{file_data['stream_link']}`"
+            f"🔗 **[Stream Ready ✨]({file_data['stream_link']})**"
         )
         
     except Exception as e:
@@ -758,9 +756,8 @@ async def handle_youtube_download(client: Client, message: Message):
                 f"• Size: {file_size // 1024 // 1024} MB\n"
                 f"• Duration: {duration_str}\n"
                 f"• Message ID: {forwarded_msg_id}\n\n"
-                f"🔗 **Stream Link:**\n"
-                f"`{stream_link}`\n\n"
-                f"💡 Use `/catalog` to see all your files"
+                f"🔗 **[Stream Ready ✨]({file_data['stream_link']})**"
+                f"💡 Use /catalog to see all your files"
             )
             
         finally:
@@ -860,7 +857,7 @@ async def handle_delete(client: Client, message: Message):
             await message.reply_text(
                 "❌ **Invalid command**\n\n"
                 "Usage: `/delete [message_id]`\n\n"
-                "Get message_id from `/catalog`",
+                "Get message_id from /catalog",
                 quote=True
             )
             return
