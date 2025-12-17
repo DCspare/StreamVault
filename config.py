@@ -29,9 +29,9 @@ class Config:
         value = os.environ.get(key, default)
         return value.strip() if value else default
 
-    def get_int_env(key, default=0):
+    def get_int_env(key: str, default: int) -> int:
         """
-        Get integer environment variable.
+        Get integer environment variable (handels negative numbers).
         
         Args:
             key (str): Environment variable name
@@ -40,10 +40,14 @@ class Config:
         Returns:
             int: Parsed integer value or default
         """
-        val = os.environ.get(key)
-        if not val or not val.strip().isdigit():
+        try:
+        value = os.getenv(key)
+        if value is None:
             return default
-        return int(val)
+        return int(value)  # Simple - handles negatives automatically
+    except (ValueError, TypeError):
+        print(f"⚠️ Invalid {key}: '{value}' - using default: {default}")
+        return default
 
     # Telegram Bot Configuration
     API_ID = get_int_env("API_ID", 0)
