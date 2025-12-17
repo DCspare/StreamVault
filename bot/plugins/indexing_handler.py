@@ -150,10 +150,13 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
         return False, f"❌ Download failed\n🔄 Reason: Unable to fetch video info\n💡 Try again in 1 minute", None
 
 async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
+async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
     """
     Forward file to log channel using copy() method.
-    This fixes the DOCUMENT vs VIDEO type mismatch errors and handles renaming (caption).
+    Includes logic to refresh session cache via get_dialogs if ID is not found.
     """
+    target_id = int(Config.LOG_CHANNEL_ID)
+
     try:
         # Create a clean caption with the Custom Name
         file_size_mb = getattr(message.document or message.video or message.audio, "file_size", 0) // (1024 * 1024)
@@ -166,30 +169,40 @@ async def forward_to_log_channel(client: Client, message: Message, custom_name: 
             f"⚠️ **Files Provided By StreamVault**"
         )
 
-        # Try to send immediately
+        # 1. Attempt direct copy (Fastest)
         sent = await message.copy(
-            chat_id=Config.LOG_CHANNEL_ID,
+            chat_id=target_id,
             caption=caption_text
         )
         logger.info(f"✅ File copied to log channel: {sent.id}")
         return sent.id
 
-    # 1. CATCH PEER ID ERRORS (The fix for your current issue)
+    # 2. CATCH PEER ID INVALID ERRORS
     except (ValueError, KeyError) as e:
-        logger.warning(f"⚠️ Channel not found in cache ({e}). Fetching info from server...")
+        logger.warning(f"⚠️ Cache Miss ({e}). Initializing dialogs to find Access Hash...")
         try:
-            # Force Telegram to refresh the channel's Access Hash
-            await client.get_chat(Config.LOG_CHANNEL_ID)
+            # We MUST use get_dialogs() to learn the Access Hash for the ID
+            # get_chat() by ID often fails on fresh sessions for private channels
+            found = False
+            async for dialog in client.get_dialogs():
+                if dialog.chat.id == target_id:
+                    found = True
+                    break  # Access Hash is now cached!
             
-            # Retry sending after refresh
+            if not found:
+                logger.error(f"❌ Bot is not seeing the channel {target_id} in its dialog list. Ensure Bot is Admin and has sent/seen a message there.")
+                return None
+
+            # 3. Retry sending after cache refresh
             sent = await message.copy(
-                chat_id=Config.LOG_CHANNEL_ID,
+                chat_id=target_id,
                 caption=caption_text
             )
             logger.info(f"✅ Retry success! File copied: {sent.id}")
             return sent.id
+            
         except Exception as retry_e:
-            logger.error(f"❌ Failed to resolve Log Channel. Make sure Bot is Admin in {Config.LOG_CHANNEL_ID}. Error: {retry_e}")
+            logger.error(f"❌ Failed to resolve Log Channel even after refresh. Error: {retry_e}")
             return None
         
     except FloodWait as e:
