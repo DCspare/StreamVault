@@ -149,29 +149,38 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
     except Exception as e:
         return False, f"❌ Download failed\n🔄 Reason: Unable to fetch video info\n💡 Try again in 1 minute", None
 
-async def forward_to_log_channel(client: Client, message: Message) -> Optional[int]:
-    """Forward file to log channel by re-uploading it"""
+async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
+    """
+    Forward file to log channel using copy() method.
+    This fixes the DOCUMENT vs VIDEO type mismatch errors and handles renaming (caption).
+    """
     try:
-        # Extract the file
-        file = message.document or message.video or message.audio
-        if not file:
-            logger.error(f"No file in message {message.id}")
-            return None
+        # Create a clean caption with the Custom Name
+        file_size_mb = getattr(message.document or message.video or message.audio, "file_size", 0) // (1024 * 1024)
         
-        # Send file to log channel
-        sent = await client.send_document(
+        caption_text = (
+            f"🎬 **{custom_name}**\n\n"
+            f"💾 **Size:** {file_size_mb} MB\n"
+            f"👤 **Uploaded By:** {message.from_user.mention}\n"
+            f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n\n"
+            f"⚠️ **Files Provided By StreamVault**"
+        )
+
+        # Using copy() automatically handles:
+        # 1. Correct media type (Video, Document, or Audio) - Fixes "Expected DOCUMENT got VIDEO"
+        # 2. Applying the new caption
+        sent = await message.copy(
             chat_id=Config.LOG_CHANNEL_ID,
-            document=file.file_id,
-            caption=f"📥 Archived File"
+            caption=caption_text
         )
         
-        logger.info(f"✅ File sent to log channel: {sent.id}")
+        logger.info(f"✅ File copied to log channel: {sent.id}")
         return sent.id
         
     except FloodWait as e:
         logger.warning(f"Flood wait during send: {e.value}s")
         await asyncio.sleep(e.value + 5)
-        return await forward_to_log_channel(client, message)
+        return await forward_to_log_channel(client, message, custom_name)
     except Exception as e:
         logger.error(f"Failed to send to log channel: {e}", exc_info=True)
         return None
@@ -427,7 +436,9 @@ async def handle_file_upload(client: Client, message: Message):
             f"• Name: {file_name}\n"
             f"• Size: {file_size // (1024 * 1024)} MB\n"
             f"• Type: {file_type.upper()}\n\n"
-            f"📝 **Send a custom name for this file** (e.g., \"My_Video_720p\")",
+            f"📝 **Please provide a Name for this file:**\n"
+            f"(e.g., \"Matrix.mp4\")\n\n"
+            f"⏭️ **Or type `/skip` to use default name.**",
             quote=True
         )
     except Exception as e:
@@ -446,16 +457,34 @@ async def handle_text_messages(client: Client, message: Message):
     try:
         user_id = message.from_user.id
         
-        # Check if this is a custom name for a file upload
+        # Check if this is a custom name (or skip command) for a file upload
         if user_id in upload_states:
             state = upload_states[user_id]
-            custom_name = message.text.strip()
+            user_text = message.text.strip()
             
-            if not custom_name:
-                await message.reply_text("❌ Invalid name. Please send a valid custom name.", quote=True)
-                return
-            
-            # Process the file upload with custom name
+            # 1. Handle Skip - Default to original filename or generated unique name
+            if user_text.lower() == "/skip":
+                original_name = state.file_info.get("file_name")
+                if original_name and original_name != "None":
+                    custom_name = original_name
+                else:
+                    custom_name = f"StreamVault_Upload_{int(time.time())}"
+                await message.reply_text(f"⏭️ Skipping rename. Using name: `{custom_name}`", quote=True)
+                
+            # 2. Handle Actual Custom Name
+            else:
+                # Prevent other commands being interpreted as names
+                if user_text.startswith("/") and len(user_text) > 1:
+                     # It's likely another command (like /start during upload process)
+                    await message.reply_text("❌ If you want to use a command, please cancel upload or type /skip first.", quote=True)
+                    return
+                    
+                custom_name = user_text
+                if len(custom_name) > 200:
+                     await message.reply_text("❌ Name too long. Keep it under 200 characters.", quote=True)
+                     return
+
+            # Process the file upload with the finalized name
             await process_file_upload(client, state, custom_name)
             
             # Clean up upload state
@@ -467,6 +496,11 @@ async def handle_text_messages(client: Client, message: Message):
             await handle_youtube_download(client, message)
             return
         
+        # Ignore other /commands so they can fall through to other handlers
+        if message.text.startswith("/"):
+            message.continue_propagation()
+            return
+            
         # Unknown text message
         await message.reply_text(
             "❓ Send me a **file** or **YouTube link** to get started!\n"
@@ -482,12 +516,14 @@ async def process_file_upload(client: Client, state: UploadState, custom_name: s
     try:
         # Send progress message
         progress_msg = await state.message.reply_text(
-            "⏳ **Processing...** Please wait\n📤 Forwarding to archive...",
+            "⏳ **Processing...** Please wait\n"
+            f"📝 Applying Name: {custom_name}\n"
+            "📤 Copying to archive...",
             quote=True
         )
         
-        # Forward to log channel
-        forwarded_msg_id = await forward_to_log_channel(client, state.message)
+        # Forward to log channel with the new Custom Name
+        forwarded_msg_id = await forward_to_log_channel(client, state.message, custom_name)
         if not forwarded_msg_id:
             await progress_msg.edit_text(
                 "❌ **Upload failed**\n🔄 Reason: Unable to forward to archive\n💡 Try again or contact support"
@@ -521,9 +557,8 @@ async def process_file_upload(client: Client, state: UploadState, custom_name: s
             f"📊 **Details:**\n"
             f"• Name: {custom_name}\n"
             f"• Size: {state.file_info['file_size'] // 1024 // 1024} MB\n"
-            f"• Message ID: {forwarded_msg_id}\n"
-            f"• Unique ID: {state.file_info['file_unique_id'][:10]}...\n\n"
-            f"🔗 **Stream Link:** {file_data['stream_link']}"
+            f"• Message ID: {forwarded_msg_id}\n\n"
+            f"🔗 **Stream Link:**\n`{file_data['stream_link']}`"
         )
         
     except Exception as e:
