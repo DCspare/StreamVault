@@ -65,6 +65,27 @@ async def main():
         
         # Verify handlers
         await bot_app.verify_handler_registration()
+        
+        # Add detailed startup logging
+        logger.info("=" * 70)
+        logger.info("✅ BOT STARTED SUCCESSFULLY")
+        logger.info("=" * 70)
+        logger.info("Handlers registered:")
+        logger.info("  ✅ /start - Welcome message")
+        logger.info("  ✅ /help - Help with commands")
+        logger.info("  ✅ /catalog - View indexed files")
+        logger.info("  ✅ /delete - Remove files")
+        logger.info("  ✅ /search - Search files")
+        logger.info("  ✅ Document uploads (document filter)")
+        logger.info("  ✅ Video uploads (video filter)")
+        logger.info("  ✅ Audio uploads (audio filter)")
+        logger.info("  ✅ YouTube URLs (text filter)")
+        logger.info("  ✅ Custom names for uploads (text filter)")
+        logger.info("=" * 70)
+        logger.info(f"Log Channel: {Config.LOG_CHANNEL_ID}")
+        logger.info(f"MongoDB: Connected to {Config.MONGO_DB_NAME}")
+        logger.info("=" * 70)
+        
     except Exception as e:
         logger.error(f"--- ❌ Bot Failed: {e} ---")
         return
