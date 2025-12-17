@@ -150,29 +150,30 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
         return False, f"❌ Download failed\n🔄 Reason: Unable to fetch video info\n💡 Try again in 1 minute", None
 
 async def forward_to_log_channel(client: Client, message: Message) -> Optional[int]:
-    """Forward file to log channel and return message ID"""
+    """Forward file to log channel by re-uploading it"""
     try:
-        # Use forward_messages instead of copy_message
-        # This is the proper way and respects permissions better
-        forwarded_messages = await client.forward_messages(
+        # Extract the file
+        file = message.document or message.video or message.audio
+        if not file:
+            logger.error(f"No file in message {message.id}")
+            return None
+        
+        # Send file to log channel
+        sent = await client.send_document(
             chat_id=Config.LOG_CHANNEL_ID,
-            from_chat_id=message.chat.id,
-            message_ids=message.id
+            document=file.file_id,
+            caption=f"📥 Archived File"
         )
         
-        if forwarded_messages:
-            logger.info(f"✅ Message forwarded successfully: {forwarded_messages[0].id}")
-            return forwarded_messages[0].id
-        else:
-            logger.error(f"Forward returned empty result")
-            return None
-            
+        logger.info(f"✅ File sent to log channel: {sent.id}")
+        return sent.id
+        
     except FloodWait as e:
-        logger.warning(f"Flood wait during forward: {e.value}s")
+        logger.warning(f"Flood wait during send: {e.value}s")
         await asyncio.sleep(e.value + 5)
         return await forward_to_log_channel(client, message)
     except Exception as e:
-        logger.error(f"Failed to forward message {message.id}: {e}")
+        logger.error(f"Failed to send to log channel: {e}", exc_info=True)
         return None
 
 async def download_youtube_video(url: str, user_id: int, progress_hook=None) -> Optional[str]:
