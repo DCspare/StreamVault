@@ -508,7 +508,7 @@ async def handle_file_upload(client: Client, message: Message):
         }
         
         # Create upload state and store for this user
-        file_states[message.from_user.id] = FileState(message, file_info)
+        FileState[message.from_user.id] = FileState(message, file_info)
         logger.debug(f"Upload state created for user {message.from_user.id}")
         
         # Cancel BUTTON 
