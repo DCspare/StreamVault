@@ -166,21 +166,37 @@ async def forward_to_log_channel(client: Client, message: Message, custom_name: 
             f"⚠️ **Files Provided By StreamVault**"
         )
 
-        # Using copy() automatically handles:
-        # 1. Correct media type (Video, Document, or Audio) - Fixes "Expected DOCUMENT got VIDEO"
-        # 2. Applying the new caption
+        # Try to send immediately
         sent = await message.copy(
             chat_id=Config.LOG_CHANNEL_ID,
             caption=caption_text
         )
-        
         logger.info(f"✅ File copied to log channel: {sent.id}")
         return sent.id
+
+    # 1. CATCH PEER ID ERRORS (The fix for your current issue)
+    except (ValueError, KeyError) as e:
+        logger.warning(f"⚠️ Channel not found in cache ({e}). Fetching info from server...")
+        try:
+            # Force Telegram to refresh the channel's Access Hash
+            await client.get_chat(Config.LOG_CHANNEL_ID)
+            
+            # Retry sending after refresh
+            sent = await message.copy(
+                chat_id=Config.LOG_CHANNEL_ID,
+                caption=caption_text
+            )
+            logger.info(f"✅ Retry success! File copied: {sent.id}")
+            return sent.id
+        except Exception as retry_e:
+            logger.error(f"❌ Failed to resolve Log Channel. Make sure Bot is Admin in {Config.LOG_CHANNEL_ID}. Error: {retry_e}")
+            return None
         
     except FloodWait as e:
         logger.warning(f"Flood wait during send: {e.value}s")
         await asyncio.sleep(e.value + 5)
         return await forward_to_log_channel(client, message, custom_name)
+        
     except Exception as e:
         logger.error(f"Failed to send to log channel: {e}", exc_info=True)
         return None
