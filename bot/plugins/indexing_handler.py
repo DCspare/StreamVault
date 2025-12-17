@@ -35,6 +35,12 @@ logger = logging.getLogger("indexing")
 MAX_FILE_SIZE = Config.MAX_FILE_SIZE_MB * 1024 * 1024  # Convert to bytes
 MAX_DURATION = Config.MAX_VIDEO_DURATION_HOURS * 3600  # Convert to seconds
 
+# Parse Log Channel ID safely
+try:
+    LOG_CHANNEL = int(Config.LOG_CHANNEL_ID)
+except:
+    LOG_CHANNEL = Config.LOG_CHANNEL_ID # Handle if username string
+
 # YouTube URL patterns
 YOUTUBE_PATTERNS = [
     r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+',
@@ -151,11 +157,9 @@ async def validate_youtube_video(url: str) -> tuple[bool, Optional[str], Optiona
 
 async def forward_to_log_channel(client: Client, message: Message, custom_name: str) -> Optional[int]:
     """
-    Forward file to log channel using copy() method.
-    Includes logic to refresh session cache via get_dialogs if ID is not found.
+    Forward file to log channel using copy().
+    renames via caption and handles caching issues.
     """
-    target_id = int(Config.LOG_CHANNEL_ID)
-
     try:
         # Create a clean caption with the Custom Name
         file_size_mb = getattr(message.document or message.video or message.audio, "file_size", 0) // (1024 * 1024)
@@ -168,41 +172,20 @@ async def forward_to_log_channel(client: Client, message: Message, custom_name: 
             f"⚠️ **Files Provided By StreamVault**"
         )
 
-        # 1. Attempt direct copy (Fastest)
+        # Using copy() handles media types automatically (Video vs Document)
         sent = await message.copy(
-            chat_id=target_id,
+            chat_id=LOG_CHANNEL,
             caption=caption_text
         )
         logger.info(f"✅ File copied to log channel: {sent.id}")
         return sent.id
 
-    # 2. CATCH PEER ID INVALID ERRORS
     except (ValueError, KeyError) as e:
-        logger.warning(f"⚠️ Cache Miss ({e}). Initializing dialogs to find Access Hash...")
-        try:
-            # We MUST use get_dialogs() to learn the Access Hash for the ID
-            # get_chat() by ID often fails on fresh sessions for private channels
-            found = False
-            async for dialog in client.get_dialogs():
-                if dialog.chat.id == target_id:
-                    found = True
-                    break  # Access Hash is now cached!
-            
-            if not found:
-                logger.error(f"❌ Bot is not seeing the channel {target_id} in its dialog list. Ensure Bot is Admin and has sent/seen a message there.")
-                return None
-
-            # 3. Retry sending after cache refresh
-            sent = await message.copy(
-                chat_id=target_id,
-                caption=caption_text
-            )
-            logger.info(f"✅ Retry success! File copied: {sent.id}")
-            return sent.id
-            
-        except Exception as retry_e:
-            logger.error(f"❌ Failed to resolve Log Channel even after refresh. Error: {retry_e}")
-            return None
+        logger.error(
+            f"❌ Peer Invalid Error ({e}). The Bot doesn't 'know' the Log Channel ID yet.\n"
+            f"FIX: Go to your Log Channel ({LOG_CHANNEL}) and send '/start' or any message."
+        )
+        return None
         
     except FloodWait as e:
         logger.warning(f"Flood wait during send: {e.value}s")
@@ -300,9 +283,20 @@ async def send_progress_message(client: Client, message: Message, text: str) -> 
     send_progress_message.progress_msg = await message.reply_text(text, quote=True)
     return send_progress_message.progress_msg
 
-@Client.on_message(filters.private & filters.command("start"))
+# --- UPDATED: Allow /start in Log Channel to cache Peer ID ---
+@Client.on_message((filters.private | filters.chat(LOG_CHANNEL)) & filters.command("start"))
 async def handle_start(client: Client, message: Message):
-    """Handle /start command"""
+    """Handle /start command (Allowed in Log Channel)"""
+    
+    # If this message is from the Log Channel, reply specifically to confirm connection
+    if message.chat.id == LOG_CHANNEL:
+        await message.reply_text(
+            "✅ **Bot Connected!**\nAccess Hash cached successfully.\nForwarding will now work.",
+            quote=True
+        )
+        return
+    
+    """Handle /start command (Allowed in private(bot chat)"""
     try:
         welcome_text = """👋 **Welcome to Shadow Streamer!**
 
