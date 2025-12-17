@@ -846,6 +846,34 @@ async def handle_catalog(client: Client, message: Message):
             "❌ **Catalog error**\n🔄 Please try again later",
             quote=True
         )
+        
+@Client.on_message(filters.private & filters.regex(r"^/stream_(\d+)"))
+async def handle_stream_command(client: Client, message: Message):
+    """Handle dynamic /stream_[id] commands"""
+    try:
+        # Extract message_id from the regex match (Group 1)
+        message_id = int(message.matches[0].group(1))
+        
+        # Verify file exists in DB
+        file_info = await db.get_file(message_id)
+        if not file_info:
+            await message.reply_text("❌ **File not found in database.**", quote=True)
+            return
+            
+        # Generate link
+        stream_link = file_info.get('stream_link') or f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{message_id}"
+        custom_name = file_info.get('custom_name', 'Video')
+        
+        # Reply with the hidden link
+        await message.reply_text(
+            f"🎬 **{custom_name}**\n\n"
+            f"🔗 **[Click Here to Stream]({stream_link})**",
+            quote=True,
+            disable_web_page_preview=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Stream command error: {e}")
 
 @Client.on_message(filters.private & filters.command("delete"))
 async def handle_delete(client: Client, message: Message):
@@ -897,21 +925,12 @@ async def handle_delete(client: Client, message: Message):
             quote=True
         )
 
-@Client.on_message(filters.private & filters.command("confirm_delete"))
+@Client.on_message(filters.private & filters.regex(r"^/confirm_delete_(\d+)"))
 async def handle_confirm_delete(client: Client, message: Message):
-    """Handle /confirm_delete command"""
+    """Handle /confirm_delete_[id] command using Regex"""
     try:
-        # Parse command
-        command_parts = message.text.split('_')
-        if len(command_parts) < 3:
-            await message.reply_text("❌ Invalid delete confirmation command.", quote=True)
-            return
-        
-        try:
-            message_id = int(command_parts[2])
-        except ValueError:
-            await message.reply_text("❌ Invalid message ID.", quote=True)
-            return
+        # Extract message_id directly from the command regex
+        message_id = int(message.matches[0].group(1))
         
         # Perform deletion
         success = await db.delete_file(message_id)
@@ -923,7 +942,7 @@ async def handle_confirm_delete(client: Client, message: Message):
             )
         else:
             await message.reply_text(
-                f"❌ **Delete failed**\nMessage ID: {message_id}",
+                f"❌ **Delete failed**\nFile ID {message_id} not found in database.",
                 quote=True
             )
             
