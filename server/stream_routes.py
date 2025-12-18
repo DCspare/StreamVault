@@ -118,7 +118,7 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
     # Smart Content-Type (Fixes 'Download instead of Play')
         # Telegram often marks MKV/MP4 as 'application/octet-stream' in Documents.
         # We assume known extensions are videos to force browser playback.
-        content_type = getattr(media, "mime_type", "application/octet-stream")
+    content_type = getattr(media, "mime_type", "application/octet-stream")
         if raw_name.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi')):
             content_type = "video/mp4"
 
@@ -223,7 +223,7 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
 
                 timeout_failures = 0
 
-            except TimeoutError as e:
+           except TimeoutError as e:
                 # GetFile timeout - retry with exponential backoff
                 # Happens on slow networks or Telegram server issues
                 timeout_failures += 1
