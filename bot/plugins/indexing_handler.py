@@ -71,7 +71,7 @@ def time_formatter(milliseconds: int) -> str:
     if hours: return f"{hours}h {minutes}m {seconds}s"
     return f"{minutes}m {seconds}s"
 
-async def show_progress(current, total, message, start_time, stage="Task"):
+async def show_progress(current, total, message, start_time, user_mention, stage="Task"):
     """
     Cool 'Hackery' Style Progress Bar with Refresh Button
     """
@@ -628,6 +628,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
         msg = await state.message.reply_text("⏳ **Starting...**")
 
     start_time = time.time()
+    user_mention = state.message.from_user.mention
     
     # Sync Hook wrapper
     def dl_progress(d):
@@ -636,7 +637,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
                 current = d.get('downloaded_bytes', 0)
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 1)
                 client.loop.create_task(
-                    show_progress(current, total, msg, start_time, stage=f"Downloading ({state.quality}p)")
+                    show_progress(current, total, msg, start_time, user_mention, stage=f"Downloading ({state.quality}p)")
                 )
             except: pass
 
@@ -665,6 +666,12 @@ async def process_youtube_final(client: Client, state: YouTubeState):
     # 2. Upload Wrapper
     f_size = os.path.getsize(file_path)
     file_name = f"{state.custom_name}.mp4" 
+
+    # Fix 'bot_usr' Not Defined Error
+    try:
+        bot_usr = (await client.get_me()).username
+    except:
+        bot_usr = "StreamVaultBot"
     
     log_caption = (
         f"🎬 **{state.custom_name}**\n\n"
@@ -678,7 +685,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
     try:
         start_up = time.time()
         async def up_progress(current, total):
-            await show_progress(current, total, msg, start_up, stage="Uploading to Cloud")
+            await show_progress(current, total, msg, start_up, user_mention, stage="Uploading to Cloud")
 
         with open(file_path, 'rb') as f:
             sent = await client.send_document(
@@ -804,7 +811,7 @@ async def process_file_final(client: Client, state: FileState):
     try:
         bot_usr = (await client.get_me()).username
     except:
-        bot_usr = "ShadowStreamerBot"
+        bot_usr = "StreamVaultBot"
     
     # 1. Prepare Styled Caption (The "New Look")
     size_str = humanbytes(state.file_info["file_size"])
