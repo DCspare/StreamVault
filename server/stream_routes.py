@@ -12,6 +12,7 @@ Provides RESTful API endpoints for streaming Telegram files:
 import mimetypes
 import logging
 import asyncio
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -93,6 +94,11 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
         logger.error(f"Meta fetch failed for chat_id={chat_id}, message_id={message_id}: {e}")
         raise HTTPException(status_code=400, detail="Meta fetch failed")
 
+        # Safe Name Logic (Fixes UnicodeEncodeError)
+        # Use filename if available, or generate a safe generic one
+        raw_name = getattr(media, "file_name", "streamed_file.mp4") or "video.mp4"
+        safe_name = quote(raw_name)  # Encodes "🕶" to "%F0%9F..."
+
     # Parse HTTP Range header for partial content requests
     # Format: "bytes=start-end" (e.g., "bytes=0-1023" or "bytes=1024-")
     range_header = request.headers.get("Range")
@@ -105,6 +111,16 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
 
     # Calculate content length for this chunk
     content_length = (end - start) + 1
+
+    # Calculate Chunks
+        chunk_size = end - start + 1
+
+    # Smart Content-Type (Fixes 'Download instead of Play')
+        # Telegram often marks MKV/MP4 as 'application/octet-stream' in Documents.
+        # We assume known extensions are videos to force browser playback.
+        content_type = getattr(media, "mime_type", "application/octet-stream")
+        if raw_name.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi')):
+            content_type = "video/mp4"
 
     # Convert byte offset to 1MB chunk offset
     # Telegram API uses 1MB chunks internally
@@ -247,7 +263,11 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
     headers = {
         "Content-Range": f"bytes {start}-{end}/{file_size}",  # Tell client which bytes we're sending
         "Accept-Ranges": "bytes",  # Tell client we support range requests
+        "Content-Length": str(chunk_size),
+        "Content-Type": content_type,
         "Content-Disposition": f'inline; filename="{file_name}"',  # Suggest filename for download
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
     }
 
     logger.debug(f"Returning StreamingResponse with headers: {headers}")
