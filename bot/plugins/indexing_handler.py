@@ -641,16 +641,21 @@ async def process_youtube_final(client: Client, state: YouTubeState):
     # 1. DOWNLOAD WRAPPER (Visual Progress)
     start_time = time.time()
     
-    async def dl_progress(d):
+    # FIX: Hook must be Synchronous (def, not async def) for yt-dlp
+    def dl_progress(d):
         if d['status'] == 'downloading':
             try:
-                # Use global helper for "Hackery" style bar
                 current = d.get('downloaded_bytes', 0)
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 1)
-                await show_progress(current, total, msg, start_time, stage=f"Downloading ({state.quality}p)")
+                
+                # Use create_task to run the async UI update without waiting
+                client.loop.create_task(
+                    show_progress(current, total, msg, start_time, stage=f"Downloading ({state.quality}p)")
+                )
             except: pass
 
-    # Use selected resolution + User's Proxy/Cookie settings
+    # Use selected resolution
+    # (Note: This runs blocking, so the bot might pause briefly during heavy downloads)
     file_path = await download_yt_res(state.url, state.quality, dl_progress)
     
     if not file_path:
@@ -661,7 +666,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
     f_size = os.path.getsize(file_path)
     file_name = f"{state.custom_name}.mp4" 
     
-    # Styled Caption for Log Channel (Your requested style)
+    # Styled Caption
     log_caption = (
         f"🎬 **{state.custom_name}**\n\n"
         f"👤 **Task By:** {state.message.from_user.mention}\n"
@@ -695,11 +700,12 @@ async def process_youtube_final(client: Client, state: YouTubeState):
             "file_size": f_size,
             "file_type": "video",
             "quality": f"{state.quality}p",
+            "uploaded_by": state.message.from_user.id, # <--- FIX: Added User ID
             "stream_link": link
         }
         await db.save_file(file_data)
 
-        # 4. SUCCESS MESSAGE (Hidden Link)
+        # 4. SUCCESS MESSAGE
         await msg.edit_text(
             f"✅ **Success!**\n\n"
             f"🎬 Name: **{state.custom_name}**\n"
@@ -713,7 +719,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
         logger.error(f"Upload flow failed: {e}")
         await msg.edit_text(f"❌ Error during upload: {e}")
     finally:
-        # Cleanup temp file
+        # Cleanup
         if os.path.exists(file_path): os.remove(file_path)
         try: os.rmdir(os.path.dirname(file_path)) 
         except: pass
@@ -803,6 +809,7 @@ async def process_file_final(client: Client, state: FileState):
             "custom_name": state.custom_name,
             "file_size": state.file_info["file_size"],
             "file_type": state.file_info["file_type"],
+            "uploaded_by": state.message.from_user.id,
             "stream_link": link
         }
         await db.save_file(file_data)
@@ -918,7 +925,7 @@ async def handle_catalog(client: Client, message: Message):
             emoji = "🎬" if file_type == "video" else "🎵" if file_type == "audio" else "📄"
             
             catalog_text += f"{i}. {emoji} **{file.get('custom_name', 'Unknown')}** ({size_str})\n"
-            catalog_text += f"   └─ 🔗 `/stream_{file.get('message_id')}`\n\n"
+            catalog_text += f"   └─ 🔗 /stream_{file.get('message_id')}\n\n"
         
         catalog_text += f"💡 **Use:** `/stream_[ID]` to get the direct link"
         
