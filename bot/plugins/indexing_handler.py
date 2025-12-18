@@ -719,43 +719,41 @@ async def process_youtube_final(client: Client, state: YouTubeState):
         except: pass
     
 async def download_yt_res(url, height, hook):
-    """Download with specific resolution, IPv4, Proxy AND Cookies"""
+    """Download with specific resolution + 403 Fixes (Android Client)"""
     temp_dir = tempfile.mkdtemp()
     
-    # Format String: try for selected height, fallback to 'best'
-    # This prevents the "Video Format Not Found" error
-    fmt_str = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
-
+    # 1. Format Selection
+    # If height is digits, try to match it. Fallback to 'best' if that specific res is gone.
+    if str(height).isdigit():
+        fmt_str = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+    else:
+        fmt_str = "best"
+    
     ydl_opts = {
         'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
         'format': fmt_str,
         'quiet': False,
-        'force_ipv4': True,   # Fixes DNS Errno -5
+        'force_ipv4': True,
         'geo_bypass': True,
-        'nocheckercertificate': True,
+        'nocheckcertificate': True,
+        'retries': 10,
+        'fragment_retries': 10,
         'progress_hooks': [hook] if hook else [],
-    }
-
-    # --- 1. 403 FORBIDDEN ---
-        # Pretend to be an Android device. This API endpoint is less strict about
-        # Data Center IPs (like Hugging Face) and doesn't need JS Runtime.
+        
+        # 403 Fix: Pretend to be Android
         'extractor_args': {
             'youtube': {
                 'player_client': ['android', 'ios'],
             }
-        },
-        
-        'retries': 10,
-        'fragment_retries': 10,
-        'progress_hooks': [hook] if hook else [],
+        }
     }
-    
+
     # 2. Inject Proxy (Secrets)
     proxy = os.environ.get("PROXY_URL") or os.environ.get("HTTP_PROXY")
     if proxy: 
         ydl_opts['proxy'] = proxy
 
-    # 3. Inject Cookies (Recommended for Enviornments like HF spaces)
+    # 3. Inject Cookies
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
 
@@ -765,8 +763,8 @@ async def download_yt_res(url, height, hook):
             path = ydl.prepare_filename(info)
             if os.path.exists(path): return path
             return None
+            
     except Exception as e:
-        # Check specifically for the 403 error to give better advice
         if "HTTP Error 403" in str(e):
             logger.error(f"DL Error: YouTube rejected Server IP. Fix: Use Proxy or Cookies. Details: {e}")
         else:
