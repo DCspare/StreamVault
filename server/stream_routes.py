@@ -92,11 +92,22 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
              content_type = "video/mp4"
 
         # 6. Parse Range Header (Handling Scrubbing/Seeking)
-        # This tells us which specific "slice" of the file the browser asked for
         range_header = request.headers.get("Range")
-        start, end = parse_range(range_header, file_size)
         
-        # Verify valid range
+        # [CRITICAL FIX] Handle Missing or Invalid Range Headers (The crash fixer)
+        # If the browser requests the full file (no Range header), we start from 0.
+        if range_header:
+            parsed_result = parse_range(range_header, file_size)
+            if parsed_result:
+                start, end = parsed_result
+            else:
+                # If parse fails, default to full file
+                start, end = 0, file_size - 1
+        else:
+            # If no header provided, stream from beginning
+            start, end = 0, file_size - 1
+        
+        # Verify valid range logic (Just in case)
         if start >= file_size or end >= file_size:
             return JSONResponse(status_code=416, content={"error": "Range Not Satisfiable"})
 
@@ -149,6 +160,7 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
         }
 
         # 9. Return 206 Partial Content Response
+        # We use 206 even for full file because it's safer for seeking behavior in players
         return StreamingResponse(
             chunk_generator(),
             status_code=206,
