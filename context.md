@@ -13,6 +13,7 @@ Shadow Streamer is a zero-budget media server stack built for Hugging Face's Doc
 * **Process Architecture:** Bot-First via `asyncio.gather(web_server, idle())` - Pyrogram owns main loop
 * **Storage Strategy:** Disk Persistence enabled - session files saved to `/app` to prevent re-auth loops
 * **Database:** MongoDB Atlas (Free Tier) for persistent file indexing
+* **UX Strategy:** Interactive State Management (Buttons/Callbacks) vs Commands
 
 ---
 
@@ -48,7 +49,7 @@ StreamVault/
 │   ├── client.py                   # ✅ Documented: ShadowBot with session pooling
 │   ├── session_pool.py             # Session pool for parallel downloads
 │   └── plugins/
-│       └── indexing_handler.py     # ✅ Documented: File upload, YouTube, catalog, search, delete
+│       └── indexing_handler.py     # ✅ Documented: Interactive Menu's, Visual Progress, YT_COOKIES, File upload, YouTube, catalog, search, delete
 │
 └── server/                         # Web Stream Logic
     └── stream_routes.py            # ✅ Documented: HTTP 206 streaming with auto-healing
@@ -58,12 +59,12 @@ StreamVault/
 
 ## ✅ ACHIEVED MILESTONES
 
-### Task 1: Session Pooling (Dec 15, 2024)
+### Task 1: Session Pooling (Dec 15, 2025)
 **Problem:** 10-15 second auth delays on every stream request  
 **Solution:** Implemented per-DC session pooling in `bot/session_pool.py`  
 **Impact:** Zero auth delays, parallel downloads, stable streaming
 
-### Task 2: Log Channel Indexing System (Dec 16, 2024)
+### Task 2: Log Channel Indexing System (Dec 16, 2025)
 **Problem:** No file persistence, users couldn't manage uploads  
 **Solution:** Complete indexing system with MongoDB  
 **Features Implemented:**
@@ -73,7 +74,7 @@ StreamVault/
 - ✅ `/catalog` command with pagination
 - ✅ `/delete` command (soft delete)
 - ✅ `/search` command (full-text search)
-- ✅ Stream link generation: `https://bot.hf.space/stream/{chat_id}/{message_id}`
+- ✅ Stream link generation: `https://bot.hf.space/stream/{log_id}/{message_id}`
 - ✅ Size & duration validation (500MB, 2 hours defaults)
 - ✅ Emoji-rich user messages
 
@@ -82,7 +83,7 @@ StreamVault/
 {
   message_id: 159,                    // Telegram message ID in LOG_CHANNEL
   file_unique_id: "xyz123abc",        // Telegram unique file ID  
-  file_id: "CAACAgIAAxkBAAIB...",    // Telegram file ID for streaming
+  file_id: "CAACAgIAAxkBAAIB...",     // Telegram file ID for streaming
   custom_name: "Avengers_Endgame",    // User-given name
   file_size: 1574507,                 // Size in bytes
   file_type: "video",                 // video, audio, file
@@ -91,27 +92,27 @@ StreamVault/
   duration: 8100,                     // Duration in seconds
   uploaded_by: 5228293685,            // User Telegram ID
   created_at: 2025-12-16T06:18:24Z,   // Timestamp
-  stream_link: "https://bot.hf.space/stream/159",
+  stream_link: "https://bot.hf.space/stream/log_ID/msg_ID",
   is_active: true                     // Soft delete flag
 }
 ```
 
-### Task 3: Plugin Loading Fix & Comprehensive Documentation (Dec 16, 2024)
+### Task 3: Plugin Loading Fix & Comprehensive Documentation (Dec 16, 2025)
 **Problem:** Plugin loading unclear, no code documentation, insufficient logging  
 **Solution:** Enhanced plugin loading, added comprehensive docs to all files
 
 **Improvements Made:**
 
 #### 1. Plugin Loading & Verification
-- ✅ Explicit plugin auto-loading via `plugins=dict(root="bot/plugins")` in ShadowBot
-- ✅ Startup logging: "✅ ShadowBot client initialized"
+- ✅ Explicit plugin auto-loading via `plugins=dict(root="bot/plugins")` in StreamVault
+- ✅ Startup logging: "✅ Bot Connected"
 - ✅ Handler registration verified at startup
 - ✅ Clear log messages for plugin loading success/failure
 
 #### 2. Help Command Enhancement
 - ✅ Updated `/help` to include `/catalog`, `/delete`, `/search` commands
-- ✅ Added stream link format: `https://yourbot.hf.space/stream/[chat_id]/[message_id]`
-- ✅ Documented all features: file upload, YouTube, catalog, limits
+- ✅ Added stream link format: `https://yourbot.hf.space/stream/[log_id]/[message_id]`
+- ✅ Documented all features: file upload, YouTube, catalog, limits, interactive buttons
 - ✅ Troubleshooting tips for users
 
 #### 3. MongoDB Schema Verification
@@ -197,7 +198,7 @@ def function_name(param: type) -> return_type:
 - Inline comments explain complex logic (chunk calculations, offset handling)
 - No excessive commenting - only where needed
 
-### Task 4: Handler Conflict Resolution & Codebase Audit (Dec 16, 2024)
+### Task 6: Handler Conflict Resolution & Codebase Audit (Dec 16, 2025)
 **Problem:** Critical handler conflicts, security risks, and code integrity issues
 **Solution:** Deleted conflicting files, secured logging, and performed full audit
 
@@ -221,17 +222,58 @@ def function_name(param: type) -> return_type:
 - ✅ **Handler Verification:** Added `verify_handler_registration()` startup check
 
 **Handler Registration Map:**
-1. `/start` command (most specific)
+1. `/start` command (private & log channel specific)
 2. `/help` command
-3. `/catalog`, `/delete`, `/search` commands
+3. `/catalog`, `/delete`, `/search` `/stream` commands
 4. Document upload (medium specific)
 5. Text messages (least specific - catches YouTube + names)
+
+### Task 6: Interactive UX & State Management (Dec 17, 2025)
+**Problem:** CLI-like commands were clunky, renaming was difficult, UI was bland.
+**Solution:** Implemented robust state machine (`FileState`, `YouTubeState`) with Interactive Buttons.
+**Features Implemented:**
+- ✅ **Visual Progress Bar:** "Hackery" style `[★★☆☆☆] 40%` with real-time speed/ETA.
+- ✅ **Refresh Button:** Added callback button to progress messages to check bot liveliness.
+- ✅ **YouTube Menu:** Interactive keyboard to select resolution (1080p, 720p, 480p).
+- ✅ **Smart Renaming:** Logic to handle `/skip` or custom input for both files and videos.
+- ✅ **Styled Captions:** Rich metadata formatting (`User`, `Size`, `Quality`, `#Hashtags`).
+- ✅ **Hidden Stream Links:** Markdown masking `[Click Here to Stream](url)` instead of raw URLs.
+
+### Task 7: Network Resilience & YouTube 403 Fixes (Dec 18, 2025)
+**Problem:** `yt-dlp` failing with `HTTP 403 Forbidden` and DNS errors on HF Spaces.
+**Solution:** implemented advanced evasion techniques.
+**Technical Implementations:**
+- ✅ **Android Client Spoofing:** `extractor_args: player_client=['android']` to bypass Datacenter blocks.
+- ✅ **IPv4 Forcing:** Solves `[Errno -5] No address associated with hostname`.
+- ✅ **Secret Cookies:** Auto-creation of `cookies.txt` from HF Secrets `YT_COOKIES` only when needed.
+- ✅ **Proxy Injection:** Auto-detection of `PROXY_URL` (SOCKS5/HTTP) from environment.
+- ✅ **Permission Caching:** New `/start` logic to cache "Access Hash" for Private Log Channels.
+
+**Updated MongoDB Schema:**
+```javascript
+{
+  message_id: 159,
+  file_unique_id: "xyz123abc",
+  custom_name: "Ramayana_Intro",
+  file_size: 7654321,
+  file_type: "video",
+  quality: "1080p",            
+  task_by: usr_mention,    // Added
+  uploaded_by: 5228293685,    // Added
+  created_at: 2025-12-18T...,
+  stream_link: "https://bot.hf.space/stream/-100.../159"
+}
+```
 
 ---
 
 ## 📊 Current System Status
 
 ### Operational Features
+- ✅ **Visual Interface:** Interactive Buttons for Cancel/Refresh/Delete.
+- ✅ **Quality Control:** User selects YouTube resolution (fallback loop included).
+- ✅ **Robust Downloading:** Cookies + Android Client + Proxy + IPv4 stack.
+- ✅ **Smart Renaming:** Unified flow for renaming or skipping.
 - ✅ Bot token authentication via Pyrogram
 - ✅ File upload with custom rename and validation
 - ✅ YouTube link download (size/duration validation)
@@ -246,7 +288,7 @@ def function_name(param: type) -> return_type:
 - ✅ Comprehensive logging (INFO, DEBUG, WARNING, ERROR)
 - ✅ Full code documentation for developers
 
-### Free Tier Capacity
+### Free Tier Capacity (Theory)
 - **Concurrent Users:** 15-20 (safe), 30-40 (with optimization)
 - **Bandwidth:** ~667MB/day (20GB/month Hugging Face limit)
 - **Storage:** Unlimited (files stored in Telegram)
@@ -254,7 +296,7 @@ def function_name(param: type) -> return_type:
 - **Monthly Earning Potential:** $5-75 (depending on usage and ads)
 
 ### Known Limitations
-- No YouTube cookies (some videos blocked after 3 days)
+- If No YouTube cookies (some videos blocked after 3 days)
 - No Voice Chat support (needs burner account session string)
 - Proxy timeouts on poor networks (auto-retry with backoff)
 - 500MB file size limit (prevents Telegram upload timeout)
@@ -342,6 +384,22 @@ Dec 18: Task 7 - Frontend UI (Vercel)               📋 PLANNED
 ---
 
 ## 🔧 Critical Implementation Details
+### YouTube Network Evasion Strategy
+Hugging Face IPs are flagged by YouTube. We use a 4-layer bypass:
+1.  **Client Spoof:** We set `extractor_args` to `android` client. This API is lenient.
+2.  **DNS Fix:** `force_ipv4=True` prevents IPv6 resolution failures in Docker.
+3.  **Cookies via Secrets:** The bot checks `os.environ["YT_COOKIES"]`. If present, it writes a temporary `cookies.txt`, uses it for auth/age-gating, and immediately deletes it.
+4.  **Proxy Fallback:** If `PROXY_URL` exists, it routes requests through SOCKS5.
+
+### State Management (`user_states`)
+We moved from a simple dictionary to Class-based states:
+*   **`FileState`:** Handles direct uploads (File Object + metadata).
+*   **`YouTubeState`:** Handles YT workflow (Info Dict + URL + Selected Quality).
+This prevents variable mismatch errors and allows cleaner switching between flows in `handle_text_messages`.
+
+### Private Channel Permission Cache
+**Issue:** On HF restart, bot forgets "Access Hash" for private channels, causing `PeerInvalid`.
+**Fix:** The new `/start` handler allows execution **inside the Log Channel**. Sending `/start` there once forces Telegram to send an update, which caches the Access Hash for the session lifespan.
 
 ### Telegram Streaming Offset Handling
 **CRITICAL:** Pyrogram's `stream_media(offset, limit)` expects:
@@ -369,16 +427,28 @@ API_ID=12345678
 API_HASH=abcdef1234567890
 BOT_TOKEN=123456:ABCdefGHIjklMNOpqrsTUVwxyz
 
-# Server Config
-PORT=7860
+# Server Config with proxy(hardcoded in client.py)
+hostname="0.0.0.0",
+PORT=7860,
+
 URL=https://yourbot.hf.space
 
 # Database Config
 MONGO_URL=mongodb+srv://user:pass@cluster.mongodb.net
-MONGO_DB_NAME=streamvault
-LOG_CHANNEL_ID=-1001234567890
+MONGO_DB_NAME=cluster name
+LOG_CHANNEL_ID=-1005154862 (using IDBot or similar)
 
-# File Limits
+# Proxy for YT
+PROXY_URL (if http use)
+http://user:pass@ip:port OR http://ip:port
+PROXY_URL (if socks5 use)
+socks5://user:pass@ip:port OR socks5://ip:port
+
+# Cookies for YT Downloads (code handles cookies.txt file creation you need to put cookie data by using cookie-editor, export in Netscape format:
+YT_COOKIES
+# Netscape HTTP Cookie File.... (a long text)
+
+# File Limits (hardcoded for now)
 MAX_FILE_SIZE_MB=500
 MAX_VIDEO_DURATION_HOURS=2
 TG_GETFILE_TIMEOUT=60
