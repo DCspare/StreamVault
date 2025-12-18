@@ -223,7 +223,7 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
 
                 timeout_failures = 0
 
-           except TimeoutError as e:
+            except TimeoutError as e:
                 # GetFile timeout - retry with exponential backoff
                 # Happens on slow networks or Telegram server issues
                 timeout_failures += 1
