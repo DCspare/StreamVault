@@ -113,7 +113,7 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
     content_length = (end - start) + 1
 
     # Calculate Chunks
-        chunk_size = end - start + 1
+    chunk_size = end - start + 1
 
     # Smart Content-Type (Fixes 'Download instead of Play')
         # Telegram often marks MKV/MP4 as 'application/octet-stream' in Documents.
