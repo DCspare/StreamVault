@@ -523,7 +523,7 @@ async def handle_file_upload(client: Client, message: Message):
             f"• Type: {file_type.upper()}\n\n"
             f"📝 **Please provide a Name for this file:**\n"
             f"(e.g., \"Matrix.mp4\")\n\n"
-            f"⏭️ **Or type `/skip` to use default name.**",
+            f"⏭️ **Or type /skip to use default name.**",
             quote=True,
         reply_markup=cancel_btn
         )
@@ -538,54 +538,43 @@ async def handle_file_upload(client: Client, message: Message):
 
 
 @Client.on_message(filters.private & filters.text)
-async def handle_text_messages(client: Client, message: Message):
-    text_clean = message.text.strip()
+async def handle_text(client: Client, message: Message):
+    text = message.text.strip()
     
-    # Allow passing commands if not involved in a flow
-    if text_clean.startswith("/") and text_clean.lower() != "/skip":
+    # 1. Ignore Commands / YT Check / Renaming check... (Keep your previous logic)
+    if text.startswith("/") and text.lower() != "/skip":
         message.continue_propagation()
+        return
 
-    try:
-        user_id = message.from_user.id
+    if is_youtube_url(text):
+        await handle_youtube_download(client, message)
+        return
+
+    # 2. State Routing
+    user_id = message.from_user.id
+    if user_id in user_states:
+        state = user_states[user_id]
         
-        # Check ACTIVE STATES (Naming Phase)
-        if user_id in user_states:
-            state = user_states[user_id]
-            
-            # --- NAMING LOGIC ---
-            if text_clean.lower() == "/skip":
-                # For File
-                if state.type == "file":
-                    custom_name = state.file_info["file_name"] or f"File_{int(time.time())}"
-                # For YT
-                else:
-                    custom_name = state.info.get("title", f"Video_{int(time.time())}")
-            else:
-                custom_name = text_clean
+        # Naming Logic...
+        if text.lower() == "/skip":
+            if state.type == "file": name = state.file_info["file_name"]
+            else: name = state.info.get("title", f"Video_{int(time.time())}")
+        else:
+            name = text
 
-            # Clean filename
-            state.custom_name = custom_name.replace("/", "_").replace("\\", "_")
+        state.custom_name = str(name).replace("/", "_")[:200]
+        
+        # Route
+        if state.type == "file":
+            # Direct files don't fail, so we can run and clean up.
+            await process_file_final(client, state)
+            del user_states[user_id] # Clean file state
             
-            # ROUTE TO CORRECT PROCESSOR
-            if state.type == "file":
-                await process_file_final(client, state)
-            elif state.type == "youtube":
-                await process_youtube_final(client, state)
-            
-            # Cleanup
-            del user_states[user_id]
-            return
-            
-        # Standard Youtube Check (Start)
-        if is_youtube_url(message.text):
-            await handle_youtube_download(client, message)
-            return
-            
-        await message.reply_text("❓ Send a File or Link to start.")
-
-    except Exception as e:
-        logger.error(f"Handler Error: {e}")
-
+        elif state.type == "youtube":
+            # YT might need to retry, so 'process_youtube_final' will handle the 'del user_states'
+            await process_youtube_final(client, state)
+        
+        return
 
 async def handle_youtube_download(client: Client, message: Message):
     """
@@ -631,42 +620,52 @@ async def handle_youtube_download(client: Client, message: Message):
     )
     
 async def process_youtube_final(client: Client, state: YouTubeState):
-    """Actual Download -> Upload Loop with Progress UI"""
+    """Download loop. On failure, asks user to retry Quality."""
     msg = state.last_msg
     try:
         await msg.edit_text(f"⏳ **Starting Download...**\nQuality: {state.quality}p")
     except:
         msg = await state.message.reply_text("⏳ **Starting...**")
 
-    # 1. DOWNLOAD WRAPPER (Visual Progress)
     start_time = time.time()
     
-    # FIX: Hook must be Synchronous (def, not async def) for yt-dlp
+    # Sync Hook wrapper
     def dl_progress(d):
         if d['status'] == 'downloading':
             try:
                 current = d.get('downloaded_bytes', 0)
                 total = d.get('total_bytes') or d.get('total_bytes_estimate', 1)
-                
-                # Use create_task to run the async UI update without waiting
                 client.loop.create_task(
                     show_progress(current, total, msg, start_time, stage=f"Downloading ({state.quality}p)")
                 )
             except: pass
 
-    # Use selected resolution
-    # (Note: This runs blocking, so the bot might pause briefly during heavy downloads)
+    # 1. Attempt Download
     file_path = await download_yt_res(state.url, state.quality, dl_progress)
     
+    # --- FAILURE HANDLER (Retry Logic) ---
     if not file_path:
-        await msg.edit_text("❌ **Download Failed.**\nSize limit exceeded or Geo-restriction.")
+        # Re-define buttons for retry
+        buttons = [
+            [InlineKeyboardButton("📺 720p", callback_data="yt_720"), InlineKeyboardButton("📱 480p", callback_data="yt_480")],
+            [InlineKeyboardButton("📉 360p", callback_data="yt_360"), InlineKeyboardButton("❌ Cancel", callback_data="yt_cancel")]
+        ]
+        
+        await msg.edit_text(
+            f"❌ **Download Failed for {state.quality}p**\n\n"
+            f"📉 The file might be too large or the quality unavailable.\n"
+            f"👇 **Please select a lower quality:**",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        # CRITICAL: We DO NOT delete 'user_states[id]' here. 
+        # The user stays in the state to click the new button.
         return
 
-    # 2. UPLOAD WRAPPER (Visual Progress)
+    # --- SUCCESS HANDLER ---
+    # 2. Upload Wrapper
     f_size = os.path.getsize(file_path)
     file_name = f"{state.custom_name}.mp4" 
     
-    # Styled Caption
     log_caption = (
         f"🎬 **{state.custom_name}**\n\n"
         f"👤 **Task By:** {state.message.from_user.mention}\n"
@@ -678,11 +677,9 @@ async def process_youtube_final(client: Client, state: YouTubeState):
 
     try:
         start_up = time.time()
-        
         async def up_progress(current, total):
             await show_progress(current, total, msg, start_up, stage="Uploading to Cloud")
 
-        # UPLOAD to Log Channel
         with open(file_path, 'rb') as f:
             sent = await client.send_document(
                 chat_id=int(Config.LOG_CHANNEL_ID),
@@ -692,7 +689,7 @@ async def process_youtube_final(client: Client, state: YouTubeState):
                 progress=up_progress
             )
         
-        # 3. DATABASE & LINK GENERATION
+        # 3. DB Save
         link = f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{sent.id}"
         file_data = {
             "message_id": sent.id,
@@ -700,36 +697,39 @@ async def process_youtube_final(client: Client, state: YouTubeState):
             "file_size": f_size,
             "file_type": "video",
             "quality": f"{state.quality}p",
-            "uploaded_by": state.message.from_user.id, # <--- FIX: Added User ID
+            "uploaded_by": state.message.from_user.id,
             "stream_link": link
         }
         await db.save_file(file_data)
-
-        # 4. SUCCESS MESSAGE
+        
         await msg.edit_text(
-            f"✅ **Success!**\n\n"
-            f"🎬 Name: **{state.custom_name}**\n"
-            f"💿 Quality: `{state.quality}p`\n"
-            f"💾 Size: `{humanbytes(f_size)}`\n\n"
+            f"✅ **Success!**\n"
+            f"🎬 Name: {state.custom_name}\n"
+            f"💿 Quality: {state.quality}p\n\n"
             f"🔗 **[Click Here to Stream]({link})**",
             disable_web_page_preview=True
         )
+        
+        # CLEANUP STATE (Only on Success)
+        del user_states[state.message.from_user.id]
 
     except Exception as e:
-        logger.error(f"Upload flow failed: {e}")
-        await msg.edit_text(f"❌ Error during upload: {e}")
+        logger.error(f"YT Process: {e}")
+        await msg.edit_text(f"❌ Upload Failed: {e}")
     finally:
-        # Cleanup
         if os.path.exists(file_path): os.remove(file_path)
-        try: os.rmdir(os.path.dirname(file_path)) 
+        try: os.rmdir(os.path.dirname(file_path))
         except: pass
     
 async def download_yt_res(url, height, hook):
-    """Download with specific resolution + 403 Fixes (Android Client)"""
+    """
+    Download with logic:
+    1. Try Standard (Fast, uses IPv4 + Android Spoof)
+    2. If 403 Forbidden -> Create Cookies from Secret & Retry
+    """
     temp_dir = tempfile.mkdtemp()
     
-    # 1. Format Selection
-    # If height is digits, try to match it. Fallback to 'best' if that specific res is gone.
+    # 1. Setup Base Options
     if str(height).isdigit():
         fmt_str = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
     else:
@@ -742,40 +742,56 @@ async def download_yt_res(url, height, hook):
         'force_ipv4': True,
         'geo_bypass': True,
         'nocheckcertificate': True,
-        'retries': 10,
-        'fragment_retries': 10,
+        'retries': 3, # Lower retries since we handle logic manually
         'progress_hooks': [hook] if hook else [],
-        
-        # 403 Fix: Pretend to be Android
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios'],
-            }
-        }
+        'extractor_args': {'youtube': {'player_client': ['android', 'ios']}}
     }
 
-    # 2. Inject Proxy (Secrets)
     proxy = os.environ.get("PROXY_URL") or os.environ.get("HTTP_PROXY")
-    if proxy: 
-        ydl_opts['proxy'] = proxy
+    if proxy: ydl_opts['proxy'] = proxy
 
-    # 3. Inject Cookies
-    if os.path.exists("cookies.txt"):
-        ydl_opts['cookiefile'] = "cookies.txt"
+    # Helper to run the download
+    def run_download(options):
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=True)
+                return ydl.prepare_filename(info)
+        except Exception as e:
+            return e # Return the error to check it
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            path = ydl.prepare_filename(info)
-            if os.path.exists(path): return path
-            return None
+    # Attempt 1: Standard
+    logger.info(f"Attempting download for {height}p (No Cookies)...")
+    result = run_download(ydl_opts)
+    
+    # Check success
+    if isinstance(result, str) and os.path.exists(result):
+        return result
+        
+    # Check for 403 Forbidden (needs Cookies)
+    if isinstance(result, Exception) and "HTTP Error 403" in str(result):
+        logger.warning("Got 403 Forbidden. Retrying with Cookies...")
+        
+        # --- RETRY WITH SECRETS COOKIES ---
+        secret_cookies = os.environ.get("YT_COOKIES")
+        cookie_path = "cookies.txt"
+        created = False
+        
+        if secret_cookies:
+            with open(cookie_path, "w") as f: f.write(secret_cookies)
+            ydl_opts['cookiefile'] = cookie_path
+            created = True
             
-    except Exception as e:
-        if "HTTP Error 403" in str(e):
-            logger.error(f"DL Error: YouTube rejected Server IP. Fix: Use Proxy or Cookies. Details: {e}")
-        else:
-            logger.error(f"DL Error: {e}")
-        return None
+            # Attempt 2
+            result = run_download(ydl_opts)
+            
+            # Cleanup Secret File
+            if created and os.path.exists(cookie_path):
+                os.remove(cookie_path)
+                
+            if isinstance(result, str) and os.path.exists(result):
+                return result
+                
+    return None
         
 async def process_file_final(client: Client, state: FileState):
     """
@@ -828,6 +844,10 @@ async def process_file_final(client: Client, state: FileState):
     except Exception as e:
         logger.error(f"File process error: {e}")
         await msg.edit_text(f"❌ System Error: {e}")
+
+# CLEANUP (Since this flow always ends here)
+    if state.message.from_user.id in user_states:
+        del user_states[state.message.from_user.id]
         
 # Callback Queries -----
 
@@ -857,7 +877,7 @@ async def handle_yt_buttons(client: Client, callback: CallbackQuery):
     await callback.message.edit_text(
         f"✅ Selected: **{target_res}p**\n\n"
         f"📝 **Renaming:**\n"
-        f"Send a name for the video, or type `/skip`.\n\n"
+        f"Send a name for the video, or type /skip.\n\n"
         f"Video: `{state.info.get('title')}`",
         reply_markup=cancel_btn
     )
