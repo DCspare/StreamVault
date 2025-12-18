@@ -76,9 +76,9 @@ async def show_progress(current, total, message, start_time, stage="Task"):
     Cool 'Hackery' Style Progress Bar with Refresh Button
     """
     now = time.time()
-    # Update only every 3 seconds to avoid FloodWait
+    # Update only every 5 seconds to avoid FloodWait
     if hasattr(show_progress, "last_update"):
-        if now - show_progress.last_update < 3 and current != total:
+        if now - show_progress.last_update < 5 and current != total:
             return
     show_progress.last_update = now
 
@@ -94,7 +94,7 @@ async def show_progress(current, total, message, start_time, stage="Task"):
     
     stats = (
         f"🚧 **{stage} in Progress...**\n\n"
-        f"**Task By:** {message.chat.first_name}\n"
+        f"**Task By:** {user_mention}\n"
         f"[{bar}] {percent:.1f}%\n"
         f"**Processed:** {humanbytes(current)} of {humanbytes(total)}\n"
         f"**Speed:** {humanbytes(speed)}/s\n"
@@ -669,10 +669,10 @@ async def process_youtube_final(client: Client, state: YouTubeState):
     log_caption = (
         f"🎬 **{state.custom_name}**\n\n"
         f"👤 **Task By:** {state.message.from_user.mention}\n"
+        f"🤖 **Uploaded By:** @{bot_usr}\n"
         f"💿 **Quality:** {state.quality}p\n"
         f"📦 **Size:** {humanbytes(f_size)}\n"
         f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n"
-        f"#StreamVault"
     )
 
     try:
@@ -799,15 +799,21 @@ async def process_file_final(client: Client, state: FileState):
     Replaces the old 'process_file_upload'.
     """
     msg = await state.message.reply_text("⏳ **Indexing File...**", quote=True)
+
+    # Fetch Bot Username for Caption
+    try:
+        bot_usr = (await client.get_me()).username
+    except:
+        bot_usr = "ShadowStreamerBot"
     
     # 1. Prepare Styled Caption (The "New Look")
     size_str = humanbytes(state.file_info["file_size"])
     log_caption = (
         f"🎬 **{state.custom_name}**\n\n"
-        f"👤 **User:** {state.message.from_user.mention}\n"
+        f"👤 **Task By:** {state.message.from_user.mention}\n"
+        f"🤖 **Uploaded By:** @{bot_usr}\n"
         f"💾 **Size:** {size_str}\n"
         f"📅 **Date:** {datetime.now().strftime('%Y-%m-%d')}\n"
-        f"#StreamVault"
     )
 
     try:
