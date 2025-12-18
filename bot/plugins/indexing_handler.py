@@ -956,6 +956,12 @@ async def handle_catalog(client: Client, message: Message):
             # Add file type emoji
             file_type = file.get('file_type', 'file')
             emoji = "🎬" if file_type == "video" else "🎵" if file_type == "audio" else "📄"
+
+            # --- DYNAMIC LINK GENERATION (Fixes old broken links) ---
+            # We construct the link fresh using the current Config.URL
+            # This fixes issues where DB has 'localhost' or old URLs
+            msg_id = file.get('message_id')
+            # The click handler below uses /stream_[ID], so it auto-generates correctly
             
             catalog_text += f"{i}. {emoji} **{file.get('custom_name', 'Unknown')}** ({size_str})\n"
             catalog_text += f"   └─ 🔗 /stream_{file.get('message_id')}\n\n"
@@ -984,8 +990,8 @@ async def handle_stream_command(client: Client, message: Message):
             await message.reply_text("❌ **File not found in database.**", quote=True)
             return
             
-        # Generate link
-        stream_link = file_info.get('stream_link') or f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{message_id}"
+        # --- GENERATE FRESH LINK ---
+        stream_link = f"{Config.URL}/stream/{Config.LOG_CHANNEL_ID}/{message_id}"
         custom_name = file_info.get('custom_name', 'Video')
         
         # Reply with the hidden link
@@ -1088,6 +1094,9 @@ async def handle_search(client: Client, message: Message):
             # Add file type emoji
             file_type = file.get('file_type', 'file')
             emoji = "🎬" if file_type == "video" else "🎵" if file_type == "audio" else "📄"
+
+            # DYNAMIC GENERATION via Command ID
+            msg_id = file.get('message_id')
             
             search_text += f"{i}. {emoji} **{file.get('custom_name', 'Unknown')}** ({size_str})\n"
             search_text += f"   └─ 🔗 `/stream_{file.get('message_id')}`\n\n"
