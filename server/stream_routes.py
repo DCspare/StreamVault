@@ -119,8 +119,8 @@ async def stream_handler(request: Request, chat_id: int, message_id: int):
         # Telegram often marks MKV/MP4 as 'application/octet-stream' in Documents.
         # We assume known extensions are videos to force browser playback.
     content_type = getattr(media, "mime_type", "application/octet-stream")
-        if raw_name.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi')):
-            content_type = "video/mp4"
+    if raw_name.lower().endswith(('.mp4', '.mkv', '.webm', '.mov', '.avi')):
+        content_type = "video/mp4"
 
     # Convert byte offset to 1MB chunk offset
     # Telegram API uses 1MB chunks internally
