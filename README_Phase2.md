@@ -184,6 +184,142 @@ graph TD
 
 - [ ] **Adaptive "Byte-Range" Player**
   HTML5 Player (ArtPlayer/Plyr) configured for HTTP 206 Streaming (Scrubbing/Seeking).<br>
+  *Allows instant seeking (Start at 50:00) without buffering the whole file.*
+
+- [ ] **Subtitle & Audio Selector**
+  UI controls to toggle Soft Subtitles (`.vtt` via FFmpeg extraction) or select different Audio tracks if available.<br>
+  *Accessibility features that match legitimate players, pulled dynamically from the file.*
+
+- [ ] **Failover Backup Player**
+  Embeds the Abyss.to/StreamWish player automatically if the Primary (Telegram) link returns a 404/Ban error.<br>
+  *Ensures the user can always watch the movie, even if our primary storage takes a hit.*
+
+- [ ] **Picture-in-Picture & Shortcuts**
+  Supports native browser PiP mode and keyboard shortcuts (F for Fullscreen, Space to Pause).<br>
+  *Standard quality-of-life features expected by modern web users.*
+
+</details>
+---
+
+<details>
+    <summary><b>📥 Interactions & Features</b></summary
+
+- [ ] **Multi-Quality "Bucket" Modal**
+  Download button opens a modal showing all linked versions (1080p, 720p, 480p) stored in the database.<br>
+  *Gives users choice of file size without managing different pages for each version.*
+
+- [ ] **Zip-Stream Download Button**
+  One-click button for Seasons/Series that triggers the backend "On-the-Fly" or "Pre-Zipped" download stream.<br>
+  *Massively convenient for downloading an entire season without 20 separate clicks.*
+
+- [ ] **User Dashboard**
+  Personalized glass panel showing "Continue Watching" history (Local Storage synced) and "Wishlist."<br>
+  *Increases user retention by tracking progress, utilizing the Magic Link login system.*
+
+- [ ] **QR / Magic Link Login UI**
+  Page accepting JWT tokens (`/auth?token=...`) or displaying a dynamic QR code for mobile-to-TV login.<br>
+  *A password-less, secure login flow that builds trust (Privacy First).*
+
+</details>
+---
+
+<details>
+    <summary><b>🛡️ Compliance & Safety Pages</b></summary>
+
+- [ ] **Report "Broken" Modal**
+  Diagnostic popup under the player allowing users to flag specific issues (Wrong File, No Audio, Dead Link).<br>
+  *Connects directly to the "Broken Link Medic" bot to trigger automated repairs.*
+
+- [ ] **DMCA / Legal Portal**
+  Formal "ISP Safe Harbor" page allowing rights holders to submit claims (routed to Admin Telegram).<br>
+  *Critical legal shield required to maintain good standing with Oracle and Ad Networks.*
+
+</details>
+---
+
+<details>
+    <summary><b>💰 Monetization</b></summary>
+
+- [ ] **Ad-Block Bypass / Message**
+  Subtle "Please turn off Adblock" toaster (Glass UI) if monetization scripts are blocked.<br>
+  *Recover revenue without locking the user out completely (Soft Wall).*
+
+- [ ] **Pop-Under & Shortener Integration**
+  Logic that triggers a Pop-under ad on the "Play" click or forces a Shortener verification for large downloads.<br>
+  *The core revenue drivers, implemented carefully to minimize user annoyance.*
+
+</details>
+---
+
+### ⚙️ PART 3: Backend & Infrastructure (Oracle Cloud)
+*The "Engine Room" running on the Ampere A1 (4 vCPU / 24GB RAM) Server.*
+
+<details>
+    <summary><b>🏗️ System Architecture</b></summary>
+
+- [ ] **Docker Swarm (Compose) Ecosystem**
+  Orchestration of 5+ isolated containers (Manager, Workers, DB, Nginx, Frontend) within the single VPS.<br>
+  *Ensures zero-conflict updates; if the "Frontend" crashes, the "Bot" stays online.*
+
+- [ ] **Nginx "Slice" Caching (200GB)**
+  Configuration to cache video chunks (10MB slices) to the persistent block storage with "Inactive-Delete" rules.<br>
+  *The core scalability engine: serves popular content from local disk (NVMe) to bypass Telegram limits.*
+
+- [ ] **Hybrid Streaming Engine**
+  FastAPI (Python) v1 deployment handling HTTP 206 Byte-Range requests for seeking/scrubbing.<br>
+  *(Roadmap: Migrating the stream route to **Golang** in V2 for 10x concurrency per core.)*
+
+- [ ] **Dual-Layer Database Cluster**
+  **MongoDB** for persistent metadata (Movies/Files) and **Redis** for high-speed hot data (Session limits/Queue).<br>
+  *Splits workload to ensure fast searching even with 50,000 files.*
+
+- [ ] **Failover "RAID 1" Logic**
+  Backend router that attempts to fetch from Telegram first, but auto-switches to Abyss.to/StreamWish if the Telegram ID fails (404).<br>
+  *Prevents dead links on the frontend by verifying connectivity milliseconds before serving headers.*
+
+</details>
+---
+
+<details>
+    <summary><b>📊 Monitoring & Analytics</b></summary>
+
+- [ ] **The "Cockpit" (Prometheus + Grafana)**
+  Self-hosted monitoring stack visualizing real-time CPU, RAM, Network Bandwidth (TB usage), and Disk Space.<br>
+  *Essential for tracking the 10TB bandwidth limit and alerting before the 200GB disk fills up.*
+
+- [ ] **Custom Business Metrics**
+  Middleware code injecting custom stats (Active Viewers, Cache Hit Ratio, Worker Health) into the Grafana dashboard.<br>
+  *Moves beyond server stats to show business health ("How many people are watching?").*
+
+- [ ] **Portainer Management UI**
+  Web GUI for Docker management to restart containers, view raw logs, and manage images without SSH.<br>
+  *Simplified day-to-day maintenance accessible from a mobile browser.*
+
+</details>
+---
+
+<details>
+    <summary><b>🛡️ Security & DevOps</b></summary>
+
+- [ ] **Cloudflare DNS Proxy ("Orange Cloud")**
+  Routes all domain traffic through Cloudflare to hide the Oracle Origin IP from DDoS attacks and Sniffers.<br>
+  *Provides SSL, caching, and a layer of anonymity for the server location.*
+
+- [ ] **GitHub Actions CI/CD**
+  Automated pipeline: `git push` -> Auto-SSH into Oracle -> `docker compose rebuild` -> Notify Admin.<br>
+  *Enables professional "Zero-Downtime" updates without manual file transfers.*
+
+- [ ] **Encryption & "Clean" Logging**
+  Optionally encrypting the storage volume (LUKS) and forcing error logs to hide Pyrogram/Telegram traces.<br>
+  *Protects data privacy "At Rest" (Oracle policy) and "In Transit" (User inspection).*
+
+- [ ] **VS Code Remote Tunnel**
+  Development setup connecting the Oracle VPS directly to your local VS Code editor.<br>
+  *Allows coding on the server as if it were your localhost.*
+
+</details>
+---
+
 
 
 ---
