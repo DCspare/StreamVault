@@ -49,20 +49,142 @@ graph TD
 
 ## ✨ Key Features (The Competitive Edge)
 
-### 💰 Monetization & Growth
-- [x] **Ad-Supported Player:** Smart Pop-under and Link Shortener integration.
-- [x] **Instant Streaming:** **Nginx Slice Caching** allows popular movies to load instantly from disk, bypassing Telegram API.
-- [x] **SEO Optimized:** Auto-generated Sitemaps and Rich Snippets (JSON-LD) for organic Google traffic.
+### 🤖 PART 1: The Automation Ecosystem(Bots)
 
-### 🛡️ Safety & Stability
-- [x] **Worker Swarm:** Loads are balanced across 10+ Telegram accounts to prevent "Flood Wait" bans.
-- [x] **Obfuscated Network:** Traffic is masked via Cloudflare and internal proxying; End-users never interact with Telegram directly.
-- [x] **Kill Switch:** Admin command `/takedown` instantly purges content from DB, Cache, and Source channels for DMCA compliance.
+<details>
+    <summary><b>🧠 Manager Bot (The Brain / Admin Assistant)</b><br>
+<i>This bot manages the database, user interactions, and gives orders to the swarm.</i></summary>
 
-### 🎥 User Experience
-- [x] **Glassmorphism UI:** Premium, app-like Dark Mode interface with fluid animations.
-- [x] **Multi-Quality Buckets:** 4K, 1080p, and 720p versions aggregated under a single movie title.
-- [x] **Stream-Zipping:** "Download Season Pack" buttons that zip 20 episodes on-the-fly without occupying server storage.
+- [ ] **Magic Link Authenticator**
+  Generates secure, time-limited JWT links (`/login`) for passwordless website access.<br>
+  *Ensures high user conversion while keeping user privacy (no phone numbers sent to web).*
+
+- [ ] **Metadata "Hoarder"**
+  Silently scrapes TMDB/OMDB API via backend proxy to fetch high-res posters, plots, and ratings.<br>
+  *Decouples the frontend from TMDB to prevent API key bans, creating a local metadata cache.*
+
+- [ ] **Content "Cleaner" Indexer**
+  Parses incoming filenames using `PTN`, strips garbage tags, and links files to TMDB Entities in MongoDB.<br>
+  *Transforms "Avngrs.Endgm.mkv" into a structured "Avengers: Endgame (2019)" database entry.*
+
+- [ ] **Global Kill Switch**
+  Executes the `/takedown [ID]` command to instantly wipe content from DB, Nginx Cache, and Source Channels.<br>
+  *A unified compliance tool to satisfy Oracle/DMCA abuse reports in seconds.*
+
+- [ ] **Swarm Commander**
+  Monitors the health of Worker Sessions; automatically routes traffic away from banned or "Flood Wait" accounts.<br>
+  *Ensures 100% uptime by treating worker sessions as disposable resources.*
+
+- [ ] **Alert & Broadcast Hub**
+  Receives system alerts (Disk Full/High Load) and formats "New Release" cards for the Public Channel.<br>
+  *Automates community management and server health monitoring from a private Admin chat.*
+
+- [ ] **Broken Link "Medic"**
+  Validates user-reported dead links via Head Request and triggers Auto-Repair (Re-Leech or Backup Swap).<br>
+  *Turns user reports into automated maintenance actions without Admin intervention.*
+
+- [ ] **Request & Wishlist Manager**
+  Manages user requests in a queue and sends automated DMs when the requested content is added.<br>
+  *Increases user retention by closing the loop on specific content demands.*
+
+- [ ] **User Gatekeeper**
+  Checks User status (Free vs. Banned) before generating stream tokens; manages anti-abuse policies.<br>
+  *Protects the bandwidth usage from being exploited by bots or scraper scripts.*
+
+- [ ] **Manual Override Console**
+  Allows admin to use commands like `/edit` to fix metadata matches or manual entry correction.<br>
+  *Provides a fallback for the 5% of automated matching errors.*
+
+- [ ] **Ad-Link Generator**
+  Integrates URL Shortener APIs (e.g., GPlinks) to convert standard stream links into monetized links before sending them to users.
+
+- [ ] **Direct Forward Indexing**
+  Instantly processes files "Forwarded" from other Telegram channels without downloading/leeching, creating a database entry in milliseconds.
+
+</details>
+---
+
+<details>
+   <summary><b> 🐝 Worker / Leech Bots (The Swarm)</b><br>
+<i>These are the 10+ Physical SIM accounts processing heavy data.</i></summary>
+<br>
+
+- [ ] **Dual-Path Ingestion**
+  Simultaneously processes video files for individual streaming AND generates pre-zipped archives for "Season Packs".<br>
+  *Maximizes utility by using unlimited Telegram storage for two different download behaviors.*
+
+- [ ] **Stream-Zipping Pipeline**
+  Creates Zip files "On-The-Fly" (or uploads pre-zipped files) to bypass local disk storage limits.<br>
+  *Allows users to download 50GB Season packs without filling the VPS hard drive.*
+
+- [ ] **Multi-Source Mirroring**
+  Uploads content to a Backup Host (Abyss.to / StreamWish) alongside Telegram Log Channels.<br>
+  *Creates a RAID 1 style redundancy to survive a total Telegram Channel ban.*
+
+- [ ] **Crowdsourced Ingestion Engine**
+  Public-facing mode allowing users to send links/torrents to be downloaded to a "Dump Channel."<br>
+  *Safe-quarantined staging area where users populate the library for you.*
+
+- [ ] **Hash-Based Blocking**
+  Calculates file hashes upon download and cross-references a blacklist to block illegal/CSAM content.<br>
+  *Automated safety shield preventing severe abuse before it reaches the database.*
+
+- [ ] **Queue Management System**
+  Limits concurrent downloads to 5–10 items to protect VPS CPU/RAM from crashing.<br>
+  *Standardizes load management for the Oracle Free Tier capabilities.*
+
+- [ ] **Auto-Screenshot Extraction**
+  Uses FFmpeg during download to capture frame snapshots at 10%, 50%, and 90%.<br>
+  *Provides "Proof of Quality" images for the website, hosted invisibly on Telegram.*
+
+- [ ] **Smart Renaming Engine**
+  Interactively or automatically renames files before upload to remove AD domains or trash text.<br>
+  *Ensures the private library remains clean and branded only with "StreamVault".*
+
+- [ ] **Subtitle Stream Prober**
+  Scans files during ingestion (using `ffprobe`) to detect embedded subtitle tracks and logs them for the Web Player to extract later.
+
+- [ ] **Proxy/Network Tunneller**
+  Configurable SOCKS5 support for workers to bypass ISP blocks or Region locks during downloads.
+
+</details>
+---
+
+### 💻 PART 2: The User Experience (Frontend Website)
+*The face of the product (`streamvault`), built with Next.js, Tailwind, and Glassmorphism.*
+
+<details>
+    <summary><b>🎨 Interface & Design</b></summary
+
+- [ ] **Glassmorphism "Obsidian" UI**
+  Deep dark mode (`#09090b`) with translucent glass layers, aurora gradients, and blur effects (`backdrop-blur-md`).<br>
+  *A premium, app-like aesthetic using **Aceternity UI** components that differentiates it from cheap/spammy movie sites.*
+
+- [ ] **Bento Grid Catalog**
+  Modern grid layout for browsing content, mixing poster sizes and dynamic widgets.<br>
+  *Replaces the standard boring "rows of posters" with a responsive, engaging layout similar to Apple TV/Netflix.*
+
+- [ ] **Instant Search Dropdown**
+  Search bar that queries the backend while typing, showing results with posters/year immediately in a glass panel.<br>
+  *Reduces user friction by finding content instantly via MongoDB text search without page reloads.*
+
+- [ ] **Metadata "Hero" Header**
+  Full-width cinematic header for the movie page featuring the "Backdrop" image, title logo, rating pills, and cast info.<br>
+  *Uses cached TMDB metadata to make the page look like a legitimate streaming service.*
+
+- [ ] **Whitelabel Image Renderer**
+  Proxies all images through `api.streamvault.net` instead of loading directly from Telegram or TMDB.<br>
+  *Hides the technology stack (Telegram) from casual inspection or Ad network bots.*
+
+</details>
+---
+
+<details>
+    <summary><b>🎥 The Player Experience</b></summary>
+
+- [ ] **Adaptive "Byte-Range" Player**
+  HTML5 Player (ArtPlayer/Plyr) configured for HTTP 206 Streaming (Scrubbing/Seeking).<br>
+
 
 ---
 
