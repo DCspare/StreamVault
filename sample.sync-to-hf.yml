@@ -1,0 +1,66 @@
+name: Sync to HuggingFace Spaces
+on:
+  push:
+    branches:
+      - main
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Configure Git identity
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "GitHub Actions Bot"
+      
+      - name: Configure merge strategy
+        run: |
+          git config pull.rebase false
+          git config merge.ff false
+          echo "✅ Git configured for merge strategy"
+      
+      - name: Add HuggingFace remote
+        run: |
+          git remote add hf https://huggingface.co/spaces/DC-Hacks/Stream Vault
+          echo "✅ HF remote added"
+      
+      - name: Fetch from HF
+        run: |
+          git fetch hf main --depth=1
+          echo "✅ Fetched from HF Spaces"
+      
+      - name: Merge HF changes into local
+        run: |
+          git merge hf/main --no-edit -m "Sync: Auto-merge HF changes" || {
+            echo "ℹ️ No changes to merge or already in sync"
+          }
+          echo "✅ Merged HF changes"
+      
+      - name: Update HF remote with auth
+        run: |
+          git remote remove hf
+          git remote add hf https://DC-Hacks:${{ secrets.HF_TOKEN }}@huggingface.co/spaces/DC-Hacks/Stream Vault
+          echo "✅ HF remote updated with auth"
+      
+      - name: Push to HuggingFace Spaces
+        run: |
+          git push hf HEAD:main -u --force
+          echo "✅ Pushed to HuggingFace Spaces"
+      
+      - name: Verify sync completion
+        run: |
+          echo "═══════════════════════════════════════════"
+          echo "✅ SYNC COMPLETED SUCCESSFULLY"
+          echo "═══════════════════════════════════════════"
+          echo ""
+          echo "Recent commits:"
+          git log --oneline -5
+          echo ""
+          echo "Remote URLs:"
+          git remote -v
+          echo "═══════════════════════════════════════════"
