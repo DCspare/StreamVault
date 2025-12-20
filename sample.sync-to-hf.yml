@@ -1,3 +1,5 @@
+# .github/workflows/sync-to-hf.yml
+
 name: Sync to HuggingFace Spaces
 on:
   push:
