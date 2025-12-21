@@ -39,9 +39,10 @@
   Auto-generates a `guest_id` via Cookie. Allowed to stream (capped at 720p speed). History saved to Browser LocalStorage.
 - [ ] **Turnstile Gate**
   **Cloudflare Turnstile** widget integrated into the "Play" button for Guests to verify "Humanity" and stop scraping bots.
-- [ ] **Telegram Login (Upgrade)**
-  - **Magic Link:** Button triggers `/auth` flow.
-  - **QR Code UI:** Display a unique Session QR on the Laptop/TV screen; User scans via Phone Bot to authorize login instantly (Cross-Device Handover).
+- [ ] **Account Linking (Magic Link)**
+  - **Auth Logic:** User enters a code or scans QR to bind their Guest Session to a permanent ID via the Backend API.
+  - **Magic Link Handler:** Page routes for `/auth/callback?token=...` that exchange the Bot-Generated JWT for a permanent Secure HttpOnly cookie.
+  - **Privacy:** Pure token exchange. No Telegram widgets, no phone number sharing on the UI.
 
 ### B. Streaming & Downloads
 - [ ] **The "Bucket" Modal**
