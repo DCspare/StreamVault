@@ -1,6 +1,6 @@
 Designing a MongoDB schema for a streaming service requires balancing **Read Speed** (Fast Website) vs. **Write Complexity** (Bot Indexing). Since our website reads 1,000x more than the bot writes, we optimize for **Read Performance**.
 
-We will use **4 Core Collections**: `movies`, `series`, `users`, and `workers`.
+We will use **4 Core Collections**: `movies`, `series`, `users`, `workers`, `reports` and `users`.
 
 ---
 
