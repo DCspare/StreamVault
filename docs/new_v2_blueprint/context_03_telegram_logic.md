@@ -24,8 +24,8 @@ We strictly separate **Administrative Logic** from **Heavy Transfer Logic** to p
 ## 🤖 2. The Manager Bot Features
 
 ### 🔐 Auth & Compliance
-- [ ] **Magic Link & QR Authenticator**
-  Generates `jwt_token` links (`/login`) for passwordless website access and handles **QR Code Scanning** events to log in a user on a separate device (TV/Laptop).
+- [ ] **Auth Token Generator (Magic Link)**
+  Generates anonymized `jwt_token` links (`streamvault.net/auth?token=...`) that allow the website to adopt the Telegram User ID for "Premium" status without the user logging in directly.
 - [ ] **Global Kill Switch (`/takedown`)**
   Executes the abuse protocol: instantly wipes specific content ID from MongoDB, triggers Nginx Cache Purge on host, and deletes the source message in Telegram.
 - [ ] **User Gatekeeper**
