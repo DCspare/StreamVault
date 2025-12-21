@@ -1,3 +1,6 @@
+### 🤖 File 2: `AI_GENERATION_PROMPT.md`
+*(Updated to force the critical "Bot-First" stability fix)*
+
 ```markdown
 # 🤖 System Prompt: StreamVault V2 Architect
 **Role:** Senior DevOps Engineer & Full-Stack Python/Next.js Developer.
