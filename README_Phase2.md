@@ -320,11 +320,130 @@ graph TD
 </details>
 ---
 
+Here is the comprehensive feature list for **Project ReadVault**.
 
+This list defines the **Lightweight/Stateless** architecture required to run on Hugging Face (Backend) and Vercel (Frontend), while ensuring future compatibility with the StreamVault Oracle merger.
 
 ---
 
-This is the structured taxonomy for our documentation. Since we have successfully fixed **Phase 1 (V1)**, these context files now strictly define **Phase 2 (The Oracle Migration)**.
+### 📚 PART 1: The Automation Ecosystem (Bots)
+
+<details>
+   <summary><b>🧠 Manager Bot (ReadVault Admin)</b><br>
+    <i>Role: Metadata management, User Search, and Command & Control.</i></summary>
+
+- [ ] **Batch Ingestion Commander**
+  Accepts direct URLs from aggregators (e.g., MangaDex, Manganato) or lists via `/batch` command to trigger bulk library population.<br>
+  *Automates the population of thousands of chapters without manual admin input.*
+
+- [ ] **Metadata Scraper (Books)**
+  Queries MyAnimeList (MAL) and Google Books API to fetch Synopsis, Authors, and Tags, independent of the source file.<br>
+  *Ensures the library looks professional with rich metadata, not just file names.*
+
+- [ ] **"Peek" Search Responder**
+  Handles user queries (`@Bot Solo Leveling`) and returns a "Preview Card" with the cover and a "Read on Website" button.<br>
+  *Acts as a funnel to drive Telegram traffic directly to the Web Interface.*
+
+- [ ] **Magic Link Authenticator**
+  Generates `jwt_token` links (`/login`) to securely authenticate users on the website for tracking read progress.<br>
+  *Standardized StreamVault-compatible auth system.*
+
+- [ ] **Abuse & Takedown Protocol**
+  Executes removal of content from MongoDB and Telegram based on ID/Hash in case of strict copyright reports.<br>
+  *Protecting the repository and Telegram channels from bans.*
+</details>
+
+---
+
+<details>
+   <summary><b>🚜 Worker Bot (The Librarian)</b><br>
+<i>Role: Handling downloads (Gallery-DL/Scripts) and Telegram Uploads.</i></summary>
+
+- [ ] **Gallery-DL Integration (Images)**
+  Subprocess logic that efficiently scrapes images from Manga/Manhwa sites into a generic format for Telegram.<br>
+  *The core engine for handling graphic novel content.*
+
+- [ ] **Document Processor (PDF/EPUB)**
+  Scripts that verify PDF integrity and inject "ReadVault" branding/metadata into the file header using `pikepdf`.<br>
+  *Ensures downloaded books carry the brand identity.*
+
+- [ ] **Ephemeral Storage Cleaner**
+  Strict logic that wipes the `/tmp` download folder immediately after successful Telegram upload.<br>
+  *Critical for Hugging Face compatibility (avoiding Disk Full errors on transient containers).*
+
+- [ ] **MediaGroup "Album" Uploader**
+  Intelligent sorting that groups pages into Telegram Albums (max 10-20 per msg) to prevent channel flooding.<br>
+  *Keeps the storage channel organized and efficient for backend retrieval.*
+</details>
+
+---
+
+### 💻 PART 2: The User Experience (Frontend)
+
+<details>
+   <summary><b>🎨 Interface & Reader</b><br>
+<i>Role: The Visual Layer (Next.js) hosted on Vercel.</i></summary>
+
+- [ ] **Vertical Scroll Engine (Webtoon Mode)**
+  Seamless, gap-less image stitching with lazy loading for "Long Strip" content (Manhwa).<br>
+  *The preferred reading format for modern mobile users.*
+
+- [ ] **Paginated Reader (Manga Mode)**
+  Click-to-next navigation with **Right-to-Left (RTL)** logic support for traditional Japanese Manga.<br>
+  *Essential feature for purists.*
+
+- [ ] **Progress Sync (Smart Bookmarks)**
+  Automatically tracks the current Chapter and Page Index, syncing to MongoDB via API on exit.<br>
+  *Users can close the tab and resume exactly where they left off on another device.*
+
+- [ ] **Visual "Peek" Preview**
+  Hovering over a book cover on the dashboard fades in "Page 1 of Chapter 1" behind the metadata.<br>
+  *Instant visual verification of quality before the user commits to reading.*
+
+- [ ] **CBZ On-The-Fly Downloader**
+  "Download Chapter" button that triggers the backend to fetch images and zip them into a `.cbz` file live.<br>
+  *Allows offline reading for users (monetized via Link Shortener).*
+</details>
+
+---
+
+### ⚙️ PART 3: Backend & Infrastructure
+
+<details>
+   <summary><b>🔒 Security & Performance</b><br>
+<i>Role: The Stateless Bridge (FastAPI on Hugging Face).</i></summary>
+
+- [ ] **Stateless Image Proxy**
+  Route (`/api/proxy/image/{id}`) that fetches bytes from Telegram RAM and pipes them to the browser with caching headers.<br>
+  *Hides Telegram origin from the browser; avoids "Hotlinking" issues and hides IP.*
+
+- [ ] **Adult Content Shield (18+)**
+  API Logic that strictly excludes `content_rating: 18+` from Search/Home unless the User is Logged In or enables "Unsafe Mode".<br>
+  *Protects the site from Adsense bans and accidental exposure.*
+
+- [ ] **Bot-First Event Loop**
+  Implementation of `asyncio.gather` to prioritize Pyrogram connectivity over Web Traffic.<br>
+  *Prevents the bot from dying when multiple users are reading simultaneously.*
+
+- [ ] **Cloudflare Turnstile Gate**
+  Integration of "Human Verification" on heavy actions (Download/NSFW Toggle) to prevent scraper bots.<br>
+  *Protecting the free-tier backend from bandwidth exhaustion.*
+</details>
+
+<details>
+   <summary><b>💰 Monetization</b>
+- [ ] **Interstitial Ad Logic**
+  Frontend trigger that injects a Full-Screen Ad between chapters (e.g., clicking "Next Chapter" -> Ad -> Load).<br>
+  *The primary high-volume revenue driver for Manga content.*
+
+- [ ] **Shortener Gateway (Downloads)**
+  Enforces a valid "Shortener Token" check before the API allows a `.cbz` or `.pdf` download stream to start.<br>
+  *Monetizing the high-cost bandwidth actions.*
+</details>
+
+---
+
+This is the structured taxonomy for our documentation. Since we have successfully fixed **Phase 1 (V1)**, these context files now strictly define **Phase 2 (The Oracle Migration)** and **Phase 2-lite (The ReadVault on HF Space)**.
 
 ---
 
@@ -410,43 +529,4 @@ docker compose up -d --build
 *Proprietary Source-Available.*  
 Designed for educational and research purposes.
 ```
-
----
-
-### 🤖 File 2: `AI_GENERATION_PROMPT.md`
-
-*Copy the text below when starting a new chat with an AI coder (ChatGPT/Claude/DeepSeek) to build this project.*
-
-```markdown
-# 🤖 System Prompt for StreamVault Development
-**Role:** Senior DevOps Architect & Full-Stack Python Developer.
-**Objective:** Assist the user in generating the code for "StreamVault," a high-scale Telegram Streaming Ecosystem hosted on Oracle Cloud.
-
----
-
-### 1. THE CONTEXT (Your Brain)
-The project is split into 3 distinct logical domains. The user will provide the specific **Context File** for the module we are currently building.
-*   **Context_Infra:** Docker Swarm, Nginx Configs, Monitoring.
-*   **Context_Frontend:** Next.js, Tailwind, Glass UI.
-*   **Context_Telegram:** Pyrogram Bots, Ingestion Logic.
-
-**Your constraints for every code generation:**
-1.  **Architecture:** Always strictly follow the **"Manager -> Worker -> Storage"** separation. Never put download logic in the Manager Bot.
-2.  **Platform:** Optimize for **Oracle Ampere A1 (ARM64)**.
-    *   *Docker:* Use `linux/arm64` base images where applicable.
-    *   *Threads:* Utilize the 4 cores via `asyncio` loop efficiency.
-3.  **Storage:** All "Persistent" data (Sessions, DB, Cache) **MUST** allow mounting to the `/data` Host Volume.
-    *   *Permission:* Ensure `Dockerfile` includes `RUN chown -R 1000:1000` logic.
-
-### 2. CODE QUALITY RULES
-*   **Tokens:** Be efficient. Do not explain basic concepts ("Here is how imports work"). Just output the solution.
-*   **Placeholders:** Use `placehold.co` for images. Use `YOUR_IP` / `YOUR_TOKEN` for secrets.
-*   **Error Handling:** Every API route must include a `try/except` block that fails gracefully (e.g., logging to Telegram Admin Channel instead of crashing stdout).
-
-### 3. THE "BUSINESS" LOGIC (Implicit)
-Always code with these business rules in mind:
-*   **Safety:** Do not leak Telegram IPs. Use Nginx Proxying for images/video.
-*   **Revenue:** Ensure logic exists to inject "Ad Scripts" or "Shortener Checks" in the download routes.
-*   **Growth:** SEO Metadata (Sitemaps) should be auto-generated from DB.
-
 ---
