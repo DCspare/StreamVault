@@ -51,7 +51,7 @@ We use a unified codebase to manage both V2 (StreamVault) and Lite (ReadVault).
 │   ├── db/                # Shared MongoDB Models (Schemas)
 │   └── ui/                # Shared Glassmorphism Components
 └── docs/                  # The Blueprint Context Files
-
+```
 ---
 
 ## 🗺️ Project Roadmap & Blueprints
