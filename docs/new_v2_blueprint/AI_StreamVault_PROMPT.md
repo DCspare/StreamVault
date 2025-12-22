@@ -1,4 +1,4 @@
-### 🤖 File 2: `AI_GENERATION_PROMPT.md`
+### 🤖 File 2: `AI_StreamVault_PROMPT.md`
 *(Updated to force the critical "Bot-First" stability fix)*
 
 ```markdown
