@@ -235,6 +235,27 @@ We will use **4 Core Collections**: `movies`, `series`, `users`, `workers`, `rep
 
 ---
 
+**The `books` Collection:** 
+```json
+{
+  "_id": "manga_onepiece",
+  "type": "manga",             // manga | comic | novel
+  "title": "One Piece",
+  "read_direction": "rtl",     // Right-To-Left
+  "chapters": [
+     { "chap": 1050, "file_id": "telegram_file_id_x", "pages": 18 },
+     { "chap": 1051, "file_id": "telegram_file_id_y", "pages": 20 }
+  ]
+}
+```
+**The Backend Route (`/api/read/{file_id}/{page}`)**
+Instead of streaming video, the Manager Bot:
+1.  Downloads the specific 300MB `.cbz` file (Video Workers do this easily).
+2.  Unzips it in RAM.
+3.  Returns specific `image_001.jpg` to the Frontend.
+
+---
+
 ### 🔭 The Indexing Strategy (How to search 10,000 files instantly)
 
 MongoDB is fast, but only if you index correctly. For `StreamVault`, run these commands in your Compass/Shell:
