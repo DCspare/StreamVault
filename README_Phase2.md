@@ -352,6 +352,16 @@ This list defines the **Lightweight/Stateless** architecture required to run on 
   Executes removal of content from MongoDB and Telegram based on ID/Hash in case of strict copyright reports.<br>
   *Protecting the repository and Telegram channels from bans.*
 </details>
+---
+
+#### ➕ More Manager Bot Features
+- [ ] **Manual Metadata Editor**
+  `/edit [ID]` command allowing Admin to fix "False Matches" from MyAnimeList or update generic Book Covers manually.
+  *Critical because automated scrapers often confuse "Light Novels" with "Manga" versions of the same title.*
+
+- [ ] **Chapter Report Handler ("Medic")**
+  Logic to receive "Broken Image / Missing Page" reports from the frontend and flag specific chapters for Re-Leeching.
+  *Essential maintenance tool, as individual images in a Telegram Album can occasionally fail.*
 
 ---
 
@@ -440,6 +450,16 @@ This list defines the **Lightweight/Stateless** architecture required to run on 
   Enforces a valid "Shortener Token" check before the API allows a `.cbz` or `.pdf` download stream to start.<br>
   *Monetizing the high-cost bandwidth actions.*
 </details>
+---
+
+#### ➕ More Frontend & Backend Features
+- [ ] **SEO & Schema Injection (Books)**
+  Server-side generation of `sitemap.xml` for Books/Manga and injection of `Schema.org/Book` JSON-LD tags.
+  *Crucial for getting "One Piece Chapter 1050" to rank on Google Search.*
+
+- [ ] **Advanced Tag Filtering**
+  Backend support for complex queries: "Manhwa" + "Isekai" + "Completed" (Inclusion/Exclusion logic).
+  *Manga readers rely heavily on Tag Filtering (Genre + Status) to find new content.*
 
 ---
 
