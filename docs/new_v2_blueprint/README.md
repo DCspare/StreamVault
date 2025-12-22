@@ -37,6 +37,21 @@ graph TD
     Workers --> Backup[(Abyss.to / Mirror)]
 ```
 
+### 📂 Monorepo Structure
+We use a unified codebase to manage both V2 (StreamVault) and Lite (ReadVault).
+
+```text
+/
+├── apps/
+│   ├── web/               # Next.js Frontend (Unified)
+│   ├── manager/           # FastAPI Brain (Auth/DB/Search)
+│   ├── worker-video/      # Pyrogram Leech/Stream Logic (StreamVault)
+│   └── worker-manga/      # Gallery-DL Leech Logic (ReadVault)
+├── packages/
+│   ├── db/                # Shared MongoDB Models (Schemas)
+│   └── ui/                # Shared Glassmorphism Components
+└── docs/                  # The Blueprint Context Files
+
 ---
 
 ## 🗺️ Project Roadmap & Blueprints
@@ -107,7 +122,16 @@ docker compose up -d --build
 1.  Send `/login` to your Manager Bot to get the Super Admin Magic Link.
 2.  Use the `/import` command (if applicable) to sync legacy channels.
 3.  Add your Worker Session strings to `config/workers/`.
+---
+### ⚡ Phase 2-Lite: ReadVault Deployment (No Oracle Required)
+If you do not have a VPS yet, deploy the **ReadVault Module** on free tiers.
 
+1.  **Hugging Face:** Deploy `apps/manager` and `apps/worker-manga`.
+    *   Set `MODE=LITE` in env variables.
+    *   Set `STORAGE_TYPE=TELEGRAM`.
+2.  **Vercel:** Deploy `apps/web`.
+    *   Set `NEXT_PUBLIC_API_URL` to your Hugging Face Space URL.
+3.  **Result:** You now have a working Manga/Manhwa Reader.
 ---
 
 ## 📜 License
