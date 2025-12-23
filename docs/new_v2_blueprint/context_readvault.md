@@ -72,6 +72,9 @@ Unlike Video Streaming, ReadVault works on **Short-Burst HTTP Requests**. This a
 *   **Role:** Metadata scraping, User Search, and Abuse control.
 *   **Batch Ingest:** Command `/batch [URL]` triggers the Worker to scrape entire series from sites like MangaDex.
 *   **"Peek" Search:** Users can search `@Bot Name`. Bot returns a "Peek Card" with the cover and a button to **Read Chapter 1** instantly on the web.
+*   **CDN Cache Purger**
+  Command `/purge_cache [Manga_ID]` that calls the Cloudflare/Vercel API to invalidate cache tags (e.g., `tag:manga-solo-leveling`) across the edge network.
+  *Essential for instantly fixing "Wrong Page" errors without waiting for the 1-year cache to expire.*
 
 ### The Worker Bot (The Librarian)
 *   **Workflow (Visuals):**
@@ -111,9 +114,15 @@ Unlike Video Streaming, ReadVault works on **Short-Burst HTTP Requests**. This a
 ## 🔒 5. Backend Logic (FastAPI on HF Space)
 
 ### The "Blind Relay" (Image Proxy)
-*   **Route:** `GET /api/proxy/image/{file_id}`
-*   **Mechanism:** Fetches bytes from Telegram RAM -> Sets `Cache-Control: public, max-age=1yr` -> Pipes to Browser.
-*   **Anonymity:** Hides Telegram from the Browser Inspector. Uses Hugging Face IP for requests.
+*   **Route:** `GET /api/proxy/image/{telegram_file_id}?group_id={manga_id}`
+*   **Mechanism:** 
+    1. Fetches bytes from Telegram RAM.
+    2. Sets Headers for aggressive Caching:
+       * `Cache-Control: public, max-age=31536000, immutable` (Browser Cache 1 Year).
+       * `CDN-Cache-Control: max-age=31536000` (Edge Cache 1 Year).
+       * `Cache-Tag: manga-{manga_id}` (Groups all pages of one manga for bulk purging).
+    3. Pipes binary stream to Browser.
+*   **Anonymity:** Hides Telegram origin. To the internet, this looks like a static asset served from your domain.
 
 ### The CBZ Downloader (Offline Reading)
 *   **Route:** `GET /api/download/cbz/{manga_id}/{chap}`
