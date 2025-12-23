@@ -48,7 +48,8 @@ You must adhere to the limitations of the **Oracle Ampere A1 (ARM64)** environme
 *   **Placeholders:**
     *   Images: Use `https://placehold.co/600x400`.
     *   Secrets: Use `os.getenv("VAR_NAME")`.
-*   **Error Handling:** Never let the app crash. Wrap critical loops in `try/except` and log errors to the **Telegram Admin Channel**.
+*   **Error Handling 1:** Never let the app crash. Wrap critical loops in `try/except` and log errors to the **Telegram Admin Channel**.
+*   **Error Handling 2:** Every API route must include a try/except block that fails gracefully (e.g., logging to **Telegram Admin Channel** instead of crashing stdout).
 
 ---
 
