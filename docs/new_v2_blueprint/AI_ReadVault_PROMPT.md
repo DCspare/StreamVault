@@ -29,6 +29,7 @@ You are building a **Distributed System** spanning three environments:
 *   **Visual Style:** "Obsidian Glass" (Dark Mode, `backdrop-blur-md`, Framer Motion).
 *   **Reader Logic:** Support both **Vertical Scroll** (Webtoon) and **Paged (RTL)** modes.
 *   **Image Security:** `<img src>` tags MUST point to your Backend Proxy (`/api/proxy...`), never directly to Telegram.
+*   **Error Handling:** Every API route must include a try/except block that fails gracefully (e.g., logging to Telegram Admin Channel instead of crashing stdout).
 
 #### C. Data (MongoDB Atlas)
 *   **Schema:** Follow the "Unified Library" schema provided in the Context File (support `media_type: "manga"` vs `"video"`).
